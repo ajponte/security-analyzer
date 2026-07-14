@@ -22,22 +22,19 @@ make help
 
 ## Continuous Integration (CI)
 
-A GitHub Actions CI workflow is configured in `.github/workflows/ci.yml`.
+A GitHub Actions CI workflow is configured in [.github/workflows/ci.yml](file:///Users/aponte/personal_workspace/security-analyzer/.github/workflows/ci.yml).
 
 ### Workflow Triggers
 
 The CI pipeline runs on:
-- All **pushed commits** to any branch.
-- All **pull requests** opened or updated.
+- **Pushes** to the `main` branch.
+- **Pull requests** targeting the `main` branch.
 
-### Workflow Jobs
+### Workflow Pipeline
 
-To ensure fast feedback, the workflow splits tasks into two parallel jobs:
+The workflow runs a single sequential **`build`** job on an Ubuntu runner:
 
-1. **Lint (`Lint` job)**:
-   - Configures the Go environment (version `1.25.x`).
-   - Runs `golangci-lint` to check code quality and style conventions.
-
-2. **Build (`Build` job)**:
-   - Configures the Go environment (version `1.25.x`).
-   - Executes `make build` to verify the codebase compiles successfully.
+1. **Checkout**: Checks out the repository code.
+2. **Go Setup**: Configures the Go environment (version `1.25`).
+3. **Lint**: Runs `golangci-lint` using `golangci/golangci-lint-action@v9` (configured with version `v2.9.0`) to inspect code quality and conventions.
+4. **Build**: Executes `make build` to verify the application compiles successfully and outputs the binary.
