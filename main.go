@@ -1,7 +1,8 @@
+package main
+
 import (
 	"context"
-	"fmt"
-	"logslog"
+	"log/slog"
 	"os"
 )
 
@@ -12,7 +13,9 @@ const (
 func main() {
 	// Create the logger instance.
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: DEFAULT_LOG_LEVEL,
 	}))
-	fmt.Print("hello world")
+
+	ctx := context.Background()
+	logger.InfoContext(ctx, "hello world")
 }
