@@ -12,6 +12,7 @@ Below are the primary `make` commands available for local development:
 
 - **`make build`**: Compiles the Go application and generates an executable under `./out/security-analyzer`.
 - **`make run`**: Compiles and executes the Go application.
+- **`make test`**: Runs all unit tests for the codebase.
 - **`make lint`**: Runs the [golangci-lint](https://golangci-lint.run/) linter against the codebase to check for style violations and potential issues.
 - **`make clean`**: Removes build artifacts and temporary files (such as the `./out` directory and coverage reports).
 
@@ -38,3 +39,4 @@ The workflow runs a single sequential **`build`** job on an Ubuntu runner:
 2. **Go Setup**: Configures the Go environment (version `1.25`).
 3. **Lint**: Runs `golangci-lint` using `golangci/golangci-lint-action@v9` (configured with version `v2.9.0`) to inspect code quality and conventions.
 4. **Build**: Executes `make build` to verify the application compiles successfully and outputs the binary.
+5. **Test**: Executes `make test` to run all unit tests and verify correctness.

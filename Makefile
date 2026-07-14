@@ -23,6 +23,9 @@ fmt: ## runs go formatters
 lint: ## lint the go code using golangci-lint
 	${GOLANGCI_LINT} run
 
+test: ## run unit tests
+	go test -v ./...
+
 
 clean: ## cleans binary and other generated files
 	go clean
