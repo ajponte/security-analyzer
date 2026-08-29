@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"security-analyzer/pkg/llm"
 )
 
 const (
 	defaultMaxTurns   = 10
+	defaultReportDir  = "llm-reports"
 	defaultReportFile = "llm-report.md"
 	systemPrompt      = "You are an expert security researcher. Scan the codebase using the 'semgrep_scan' tool, analyze the findings, and generate a comprehensive security report detailing findings grouped by severity (Critical, High, Medium, Low) with code snippets and recommendations."
 )
@@ -19,6 +21,7 @@ const (
 // Options configures the analysis execution.
 type Options struct {
 	MaxTurns   int
+	OutputDir  string
 	OutputFile string
 }
 
@@ -30,21 +33,24 @@ type ToolClient interface {
 
 // Analyzer orchestrates the LLM and MCP tool execution to generate security reports.
 type Analyzer struct {
-	llmClient  llm.LLMClient
-	toolClient ToolClient
-	opts       Options
+	llmClient      llm.LLMClient
+	toolClient     ToolClient
+	opts           Options
+	capturedScanID string
 }
 
 // NewAnalyzer creates a new Analyzer instance.
 func NewAnalyzer(llmClient llm.LLMClient, toolClient ToolClient, opts ...Options) *Analyzer {
 	opt := Options{
 		MaxTurns:   defaultMaxTurns,
+		OutputDir:  defaultReportDir,
 		OutputFile: defaultReportFile,
 	}
 	if len(opts) > 0 {
 		if opts[0].MaxTurns > 0 {
 			opt.MaxTurns = opts[0].MaxTurns
 		}
+		opt.OutputDir = opts[0].OutputDir
 		opt.OutputFile = opts[0].OutputFile
 	}
 
@@ -57,16 +63,43 @@ func NewAnalyzer(llmClient llm.LLMClient, toolClient ToolClient, opts ...Options
 
 // Analyze runs the agentic loop to scan the target path and returns the generated report.
 func (a *Analyzer) Analyze(ctx context.Context, scanPath string) (string, error) {
-	// 1. Discover tools dynamically from the MCP server.
 	tools, err := a.toolClient.ListTools(ctx)
 	if err != nil {
 		return "", fmt.Errorf("discovering tools from MCP server: %w", err)
 	}
-
 	slog.Info("Discovered tools from MCP server", "count", len(tools))
 
-	// 2. Prepare initial messages.
-	messages := []llm.Message{
+	messages := a.initialMessages(scanPath)
+
+	for turn := 0; turn < a.opts.MaxTurns; turn++ {
+		slog.Info("Sending conversation context to LLM", "turn", turn+1)
+		resp, err := a.llmClient.GenerateResponse(ctx, messages, tools)
+		if err != nil {
+			return "", fmt.Errorf("LLM turn %d failed: %w", turn+1, err)
+		}
+
+		messages = append(messages, llm.Message{
+			Role:      llm.RoleAssistant,
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+
+		// Concluded when no further tool calls are requested.
+		if len(resp.ToolCalls) == 0 {
+			a.saveReport(resp.Content)
+			return resp.Content, nil
+		}
+
+		// Execute tool calls and append findings.
+		toolMessages := a.executeToolCalls(ctx, resp.ToolCalls)
+		messages = append(messages, toolMessages...)
+	}
+
+	return "", fmt.Errorf("analysis did not finish within %d iterations", a.opts.MaxTurns)
+}
+
+func (a *Analyzer) initialMessages(scanPath string) []llm.Message {
+	return []llm.Message{
 		{
 			Role:    llm.RoleSystem,
 			Content: systemPrompt,
@@ -76,75 +109,85 @@ func (a *Analyzer) Analyze(ctx context.Context, scanPath string) (string, error)
 			Content: fmt.Sprintf("Analyze code in %s", scanPath),
 		},
 	}
+}
 
-	var finalReport string
+func (a *Analyzer) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) []llm.Message {
+	results := make([]llm.Message, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		slog.Info("LLM requested tool call", "tool", tc.Name, "id", tc.ID)
 
-	// 3. Multi-turn execution loop.
-	for turn := 0; turn < a.opts.MaxTurns; turn++ {
-		slog.Info("Sending conversation context to LLM", "turn", turn+1)
-		resp, err := a.llmClient.GenerateResponse(ctx, messages, tools)
+		args, err := parseToolArguments(tc.Arguments)
 		if err != nil {
-			return "", fmt.Errorf("LLM turn %d failed: %w", turn+1, err)
-		}
-
-		// Record assistant message.
-		messages = append(messages, llm.Message{
-			Role:      llm.RoleAssistant,
-			Content:   resp.Content,
-			ToolCalls: resp.ToolCalls,
-		})
-
-		// Check if LLM has concluded without requesting more tools.
-		if len(resp.ToolCalls) == 0 {
-			finalReport = resp.Content
-			break
-		}
-
-		// Execute tool calls.
-		for _, tc := range resp.ToolCalls {
-			slog.Info("LLM requested tool call", "tool", tc.Name, "id", tc.ID)
-
-			var args map[string]interface{}
-			if tc.Arguments != "" {
-				if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
-					errMsg := fmt.Sprintf("Error parsing tool arguments: %v", err)
-					messages = append(messages, llm.Message{
-						Role:       llm.RoleTool,
-						Content:    errMsg,
-						Name:       tc.Name,
-						ToolCallID: tc.ID,
-					})
-					continue
-				}
-			}
-
-			// Call MCP server.
-			toolResult, err := a.toolClient.CallTool(ctx, tc.Name, args)
-			if err != nil {
-				toolResult = fmt.Sprintf("Tool execution failed: %v", err)
-			}
-
-			messages = append(messages, llm.Message{
+			results = append(results, llm.Message{
 				Role:       llm.RoleTool,
-				Content:    toolResult,
+				Content:    fmt.Sprintf("Error parsing tool arguments: %v", err),
 				Name:       tc.Name,
 				ToolCallID: tc.ID,
 			})
+			continue
 		}
-	}
 
-	if finalReport == "" {
-		return "", fmt.Errorf("analysis did not finish within %d iterations", a.opts.MaxTurns)
-	}
-
-	// 4. Save report file if configured.
-	if a.opts.OutputFile != "" {
-		if err := os.WriteFile(a.opts.OutputFile, []byte(finalReport), 0644); err != nil {
-			slog.Error("Failed to write output report file", "file", a.opts.OutputFile, "error", err)
+		toolResult, err := a.toolClient.CallTool(ctx, tc.Name, args)
+		if err != nil {
+			toolResult = fmt.Sprintf("Tool execution failed: %v", err)
 		} else {
-			slog.Info("Security analysis report saved", "file", a.opts.OutputFile)
+			// Extract scan_id if returned in the tool result
+			var probe struct {
+				ScanID string `json:"scan_id"`
+			}
+			if probeErr := json.Unmarshal([]byte(toolResult), &probe); probeErr == nil && probe.ScanID != "" {
+				a.capturedScanID = probe.ScanID
+			}
+		}
+
+		results = append(results, llm.Message{
+			Role:       llm.RoleTool,
+			Content:    toolResult,
+			Name:       tc.Name,
+			ToolCallID: tc.ID,
+		})
+	}
+	return results
+}
+
+func parseToolArguments(argsJSON string) (map[string]interface{}, error) {
+	if argsJSON == "" {
+		return nil, nil
+	}
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return nil, err
+	}
+	return args, nil
+}
+
+func (a *Analyzer) saveReport(reportContent string) {
+	outputFile := a.opts.OutputFile
+	if outputFile == "" {
+		return
+	}
+
+	// If using the default report name and a scan_id was captured, name file after the scan ID.
+	if a.capturedScanID != "" && outputFile == defaultReportFile {
+		outputFile = fmt.Sprintf("%s.md", a.capturedScanID)
+	}
+
+	targetPath := outputFile
+	if a.opts.OutputDir != "" && !filepath.IsAbs(targetPath) {
+		targetPath = filepath.Join(a.opts.OutputDir, targetPath)
+	}
+
+	dir := filepath.Dir(targetPath)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			slog.Error("Failed to create report directory", "dir", dir, "error", err)
+			return
 		}
 	}
 
-	return finalReport, nil
+	if err := os.WriteFile(targetPath, []byte(reportContent), 0644); err != nil {
+		slog.Error("Failed to write output report file", "file", targetPath, "error", err)
+	} else {
+		slog.Info("Security analysis report saved", "file", targetPath)
+	}
 }

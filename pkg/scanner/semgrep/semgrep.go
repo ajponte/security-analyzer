@@ -3,11 +3,14 @@ package semgrep
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"security-analyzer/pkg/config"
 )
@@ -67,6 +70,9 @@ func (s *SemgrepScanner) Scan(ctx context.Context, targetPath string) (*ScanRepo
 	if stdoutBuf.Len() > 0 {
 		var report ScanReport
 		if jsonErr := json.Unmarshal(stdoutBuf.Bytes(), &report); jsonErr == nil {
+			if report.ScanID == "" {
+				report.ScanID = generateScanID()
+			}
 			return &report, nil
 		}
 	}
@@ -76,4 +82,10 @@ func (s *SemgrepScanner) Scan(ctx context.Context, targetPath string) (*ScanRepo
 	}
 
 	return nil, fmt.Errorf("semgrep run completed but output was empty or invalid JSON (stderr: %s)", stderrBuf.String())
+}
+
+func generateScanID() string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("scan-%s-%s", time.Now().Format("20060102-150405"), hex.EncodeToString(b))
 }

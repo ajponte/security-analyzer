@@ -10,7 +10,7 @@ The **LLM Integration** provides intelligent, automated security audits and vuln
 - **Agentic Multi-Turn Analysis**: Orchestrate iterative interactions where the LLM requests scans, inspects results, and generates a structured audit report grouped by severity.
 - **Functional Options Pattern**: Support immutable, idiomatic client construction (`WithHTTPClient`, `WithEndpoint`/`WithBaseURL`, `WithMaxTokens`) across all provider packages for production and test environments.
 - **Modular File & Function Decomposition**: Isolate wire format models (`types.go`), translation algorithms (`translate.go`), and client execution logic (`client.go`) into focused, single-responsibility files.
-- **Report Persistence**: Emit synthesized reports directly to standard output (`stdout`) and save them to markdown artifacts (`llm-report.md`) for CI/CD archiving and human review.
+- **Report Persistence**: Emit synthesized reports directly to standard output (`stdout`) and save them to markdown artifacts (`llm-reports/`) for CI/CD archiving and human review.
 - **Modular CLI Architecture**: Decouple CLI argument parsing, failure policy checks, and command execution runners (`runMCP`, `runAnalyze`, `runScan`) into testable pure functions in `main.go`.
 
 ---
@@ -65,7 +65,7 @@ sequenceDiagram
         end
     end
 
-    Analyzer->>Analyzer: Save report to llm-report.md
+    Analyzer->>Analyzer: Save report to `llm-reports/`
     Analyzer-->>Main: Final report content
     Main->>User: Print final report to stdout
     Main->>MCPClient: Close() (Terminates MCP subprocess)
@@ -196,9 +196,11 @@ The `Analyzer` orchestrator executes the agentic feedback loop:
   1. Dynamically loads tool schemas from the MCP client.
   2. Sends initial prompt context to the LLM.
   3. Evaluates responses:
-     - If tool calls are requested: parses arguments, calls the tool client, appends `RoleTool` findings, and requests the next turn.
-     - If text report is synthesized: saves report to disk (`llm-report.md` by default or custom path) and returns output.
+     - If tool calls are requested: parses arguments via `parseToolArguments`, calls the tool client, captures `scan_id` from scan results, appends `RoleTool` findings via `executeToolCalls`, and requests the next turn.
+     - If text report is synthesized: saves report via `saveReport` into `llm-reports/<scan_id>.md` (auto-creating the directory with `os.MkdirAll`) and returns output.
   4. Enforces execution limits (`MaxTurns`, default 10) to guard against unbounded execution loops.
+
+For detailed report schemas, artifact persistence, and scan ID lifecycle, see the [Report Generation Specification](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/specs/report-generation.md).
 
 ---
 

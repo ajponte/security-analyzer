@@ -94,7 +94,7 @@ Responsible for loading configurations, verifying local environments, and defini
 Executes the physical binary and serializes results:
 - [SemgrepScanner](file:///Users/aponte/personal_workspace/security-analyzer/pkg/scanner/semgrep/semgrep.go#L15): Implements scanner logic.
 - [Scan](file:///Users/aponte/personal_workspace/security-analyzer/pkg/scanner/semgrep/semgrep.go#L25): Prepares commands using Go's `os/exec` package, pipes standard buffers, and manages execution context.
-- [ScanReport](file:///Users/aponte/personal_workspace/security-analyzer/pkg/scanner/semgrep/types.go#L44): Maps structural outputs from `semgrep scan --json`. Holds `Results`, `Errors`, and `Paths`.
+- [ScanReport](file:///Users/aponte/personal_workspace/security-analyzer/pkg/scanner/semgrep/types.go#L44): Maps structural outputs from `semgrep scan --json`. Holds `ScanID`, `Results`, `Errors`, and `Paths`. Unique `ScanID` is automatically assigned for artifact traceability.
 
 ### report ([pkg/report/report.go](file:///Users/aponte/personal_workspace/security-analyzer/pkg/report/report.go))
 Exports scan findings to external environments:
