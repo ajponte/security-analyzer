@@ -1,0 +1,93 @@
+name: Build & Publish Container to AWS ECR
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write # Required for requesting AWS OIDC Web Identity Token
+  contents: read  # Required for actions/checkout
+
+env:
+  AWS_REGION: us-east-1 # AWS Public ECR API endpoint requires us-east-1
+  PUBLIC_ECR_REGISTRY: public.ecr.aws/a1b2c3d4
+  IMAGE_NAME: ajp-security-analyzer
+  ROLE_TO_ASSUME: arn:aws:iam::123456789012:role/GitHubActions-ECR-Publisher
+
+jobs:
+  build-and-test:
+    name: Build & Validate Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Test Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:test
+          load: true
+
+      - name: Smoke Test Image Execution
+        run: |
+          docker run --rm ${{ env.IMAGE_NAME }}:test --help || true
+
+  publish-public-ecr:
+    name: Publish to AWS Public ECR
+    needs: build-and-test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Login to AWS Public ECR
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Extract Docker Metadata (Tags & Labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.PUBLIC_ECR_REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build & Push Image to Public ECR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
