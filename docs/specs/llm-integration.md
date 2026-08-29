@@ -1,4 +1,4 @@
-# Architectural Specification: LLM Integration
+# Architectural Specification: LLM Integration & Provider Architecture
 
 ## 1. Overview & Goals
 
@@ -8,8 +8,10 @@ The **LLM Integration** provides intelligent, automated security audits and vuln
 - **Multi-Provider Support**: Seamlessly switch between LLM providers (OpenAI, Anthropic Claude, Google Gemini) via environment configuration without code changes.
 - **Dynamic Tool Execution**: Utilize the Model Context Protocol (MCP) over standard I/O (stdio) to dynamically discover and invoke scanning tools (`semgrep_scan`) in an isolated subprocess.
 - **Agentic Multi-Turn Analysis**: Orchestrate iterative interactions where the LLM requests scans, inspects results, and generates a structured audit report grouped by severity.
+- **Functional Options Pattern**: Support immutable, idiomatic client construction (`WithHTTPClient`, `WithEndpoint`/`WithBaseURL`, `WithMaxTokens`) across all provider packages for production and test environments.
+- **Modular File & Function Decomposition**: Isolate wire format models (`types.go`), translation algorithms (`translate.go`), and client execution logic (`client.go`) into focused, single-responsibility files.
 - **Report Persistence**: Emit synthesized reports directly to standard output (`stdout`) and save them to markdown artifacts (`llm-report.md`) for CI/CD archiving and human review.
-- **Modular & Decoupled Architecture**: Maintain clear separation of concerns across configuration loading, provider clients, MCP subprocess management, and analysis orchestration, establishing the foundation for future remote API routes.
+- **Modular CLI Architecture**: Decouple CLI argument parsing, failure policy checks, and command execution runners (`runMCP`, `runAnalyze`, `runScan`) into testable pure functions in `main.go`.
 
 ---
 
@@ -21,7 +23,7 @@ The **LLM Integration** provides intelligent, automated security audits and vuln
 sequenceDiagram
     autonumber
     actor User as Developer / CI Runner
-    participant Main as main.go
+    participant Main as main.go (parseCLIArgs -> runAnalyze)
     participant Config as pkg/config
     participant Factory as pkg/llm/factory
     participant Analyzer as pkg/analyzer
@@ -33,7 +35,7 @@ sequenceDiagram
     Main->>Config: LoadConfig()
     Config-->>Main: Config (Semgrep + LLM)
     Main->>Factory: NewClient(&cfg.LLM)
-    Factory-->>Main: LLMClient instance
+    Factory-->>Main: LLMClient instance (configured via Options)
     Main->>MCPClient: NewMCPClient(selfExecutablePath)
     MCPClient->>MCPServer: Spawn subprocess (security-analyzer mcp)
     MCPClient->>MCPServer: Connect StdioTransport
@@ -75,7 +77,7 @@ sequenceDiagram
 
 All LLM operations are abstracted behind a unified interface in `pkg/llm`, ensuring that provider-specific serialization, authentication, and endpoint protocols remain fully decoupled from the core application logic.
 
-### Core Interfaces & Models ([pkg/llm/client.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/llm/client.go))
+### Core Interfaces & Transport Models ([pkg/llm/client.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/llm/client.go))
 
 ```go
 type MessageRole string
@@ -98,7 +100,7 @@ type Message struct {
 type Tool struct {
     Name        string      `json:"name"`
     Description string      `json:"description"`
-    Parameters  interface{} `json:"parameters"`
+    Parameters  interface{} `json:"parameters"` // JSON Schema structure
 }
 
 type ToolCall struct {
@@ -115,98 +117,108 @@ type Response struct {
 type LLMClient interface {
     GenerateResponse(ctx context.Context, messages []Message, tools []Tool) (*Response, error)
 }
+
+// HTTPClient abstracts HTTP request execution across LLM providers and test mocks.
+type HTTPClient interface {
+    Do(req *http.Request) (*http.Response, error)
+}
 ```
 
-### Provider Implementations
+---
 
-1. **OpenAI ([pkg/llm/openai/openai.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/llm/openai/openai.go))**:
-   - Backed by the official `github.com/sashabaranov/go-openai` SDK.
-   - Maps `Tool` definitions to `openai.Tool` (`ToolTypeFunction`).
-   - Translates `RoleTool` messages into `openai.ChatCompletionMessage` with `ToolCallID`.
-   - Supports configurable base URLs and HTTP transports for local testing with mock servers.
+## 4. Provider Architecture & Functional Options
 
-2. **Anthropic Claude ([pkg/llm/anthropic/anthropic.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/llm/anthropic/anthropic.go))**:
-   - Directly interfaces with Anthropic's Messages API (`/v1/messages`).
-   - Extracts `RoleSystem` messages into the top-level `system` prompt parameter.
-   - Translates assistant tool calls to `tool_use` content blocks and maps `RoleTool` findings to `tool_result` content blocks.
-   - **Turn Coalescing**: Coalesces consecutive `RoleTool` responses into a single `user` message turn with multiple `tool_result` blocks, strictly complying with Anthropic's role alternation requirement (`user` $\leftrightarrow$ `assistant`).
+Each provider is implemented as an independent package adhering to standard Go idiomatic conventions and decomposed into single-responsibility units:
 
-3. **Google Gemini ([pkg/llm/gemini/gemini.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/llm/gemini/gemini.go))**:
-   - Directly interfaces with Google's Gemini `generateContent` API (`/v1beta/models/{model}:generateContent`).
-   - Extracts `RoleSystem` messages into `systemInstruction`.
-   - Maps tool schemas into `FunctionDeclarations` and maps tool calls to `functionCall` parts.
-   - **Part Coalescing**: Coalesces consecutive function responses into a single `user` turn with multiple `functionResponse` parts, strictly complying with Gemini's multi-turn alternation rules.
+```mermaid
+flowchart LR
+    FACTORY[pkg/llm/factory] --> OPENAI[pkg/llm/openai]
+    FACTORY --> ANTHROPIC[pkg/llm/anthropic]
+    FACTORY --> GEMINI[pkg/llm/gemini]
 
-### Provider Factory ([pkg/llm/factory/factory.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/llm/factory/factory.go))
-The factory instantiates the requested provider based on `config.LLMConfig`:
+    subgraph "Provider Package Layout"
+        CLIENT[client.go / openai.go / anthropic.go / gemini.go]
+        TRANSLATE[translate.go]
+        TYPES[types.go]
+        CLIENT --> TRANSLATE
+        TRANSLATE --> TYPES
+    end
+```
+
+### 1. OpenAI ([pkg/llm/openai](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/llm/openai))
+- **`openai.go`**: Contains `Client` struct, Functional Options (`WithHTTPClient`, `WithBaseURL`), and `GenerateResponse`. Backward-compatible alias `type OpenAIClient = Client` is preserved.
+- **`translate.go`**: Decoupled helpers:
+  - `translateMessages`: Converts domain `llm.Message` slice to `[]openai.ChatCompletionMessage`.
+  - `translateMessage`: Maps individual message roles, content, and `ToolCalls`.
+  - `translateTools`: Maps `[]llm.Tool` to `[]openai.Tool` (`ToolTypeFunction`).
+  - `translateResponseToolCalls`: Maps response tool calls back to domain `[]llm.ToolCall`.
+
+### 2. Anthropic Claude ([pkg/llm/anthropic](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/llm/anthropic))
+- **`anthropic.go`**: Contains `Client` struct, Functional Options (`WithHTTPClient`, `WithEndpoint`, `WithMaxTokens`), and `GenerateResponse`.
+- **`types.go`**: Encapsulates internal wire structs (`anthropicRequest`, `anthropicMessage`, `anthropicContent`, `anthropicTool`, `anthropicResponse`, `anthropicError`).
+- **`translate.go`**: Modular translation algorithms:
+  - `appendSystemText`: Aggregates multiple system messages into a top-level prompt string.
+  - `translateUserMessage`: Builds user text content blocks.
+  - `translateAssistantMessage` / `translateToolCall`: Maps assistant turns and `tool_use` blocks.
+  - `appendToolResultMessage`: Maps `tool_result` blocks and **coalesces consecutive tool results into the preceding user turn**, strictly fulfilling Anthropic's alternating role requirements (`user` $\leftrightarrow$ `assistant`).
+
+### 3. Google Gemini ([pkg/llm/gemini](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/llm/gemini))
+- **`gemini.go`**: Contains `Client` struct, Functional Options (`WithHTTPClient`, `WithEndpointBase`), and `GenerateResponse`.
+- **`types.go`**: Encapsulates internal wire structs (`geminiRequest`, `geminiContent`, `geminiPart`, `geminiFunctionCall`, `geminiFunctionResponse`, `geminiTool`, `geminiResponse`, `geminiError`).
+- **`translate.go`**: Modular translation algorithms:
+  - `appendSystemText`: Aggregates system prompt into `systemInstruction`.
+  - `translateUserContent`: Builds user text parts.
+  - `translateModelContent` / `translateFunctionCallPart`: Maps model turns and `functionCall` parts.
+  - `appendToolResponseContent`: Maps `FunctionResponse` parts and **coalesces consecutive responses into the preceding user turn**, strictly fulfilling Gemini's turn alternation requirements.
+
+### 4. Provider Factory ([pkg/llm/factory](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/llm/factory))
+The factory constructs clients using standardized `NewClientWithConfig`:
 ```go
 func NewClient(cfg *config.LLMConfig) (llm.LLMClient, error)
 ```
 
 ---
 
-## 4. MCP Client & Dynamic Tool Discovery
+## 5. MCP Subprocess Client & Dynamic Discovery
 
-The integration adopts a self-contained client-server architecture using the official Model Context Protocol Go SDK (`github.com/modelcontextprotocol/go-sdk`):
-
-### Subprocess Management ([pkg/mcp/client.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/mcp/client.go))
-- **Executable Discovery**: When running `security-analyzer analyze`, the client locates its own binary on disk (`os.Executable()`) and spawns a child process with the `mcp` argument (`security-analyzer mcp`).
-- **Stdio Isolation**: The parent client and child server communicate across standard I/O streams using `mcp.CommandTransport`. All logging on both sides is directed to `os.Stderr` or standard loggers to prevent corrupting the JSON-RPC channel.
-- **Dynamic Tool Listing**: The client queries available tools dynamically via `session.ListTools(ctx, nil)` and translates them into `[]llm.Tool`. No tool schemas are hardcoded in the client, allowing new tools registered on the server to become immediately available to the LLM.
+The client-server integration is implemented using the Model Context Protocol Go SDK (`github.com/modelcontextprotocol/go-sdk`):
+- **Subprocess Management**: Spawns `./out/security-analyzer mcp` as an isolated child process via `os.Executable()`.
+- **Transport Isolation**: Stdio streams are exclusively used for JSON-RPC message exchange. Application logs are redirected to `os.Stdout` (in CLI mode) or `os.Stderr` (in MCP mode) to prevent stream corruption.
+- **Dynamic Tool Listing**: Discovers available tools at runtime via `session.ListTools(ctx, nil)`, translating schema structures dynamically into `[]llm.Tool`.
 
 ---
 
-## 5. Analyzer Engine ([pkg/analyzer/analyzer.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/analyzer/analyzer.go))
+## 6. Analyzer Engine ([pkg/analyzer](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/analyzer))
 
-The `Analyzer` orchestrator coordinates the multi-turn agentic loop between the LLM and the tool client:
-
-### Key Components
-- **`ToolClient` Interface**: Abstract interface requiring `ListTools` and `CallTool`, satisfied by `*mcp.MCPClient` and mock clients.
-- **Agentic Loop**:
-  1. Dynamically discovers MCP tools.
-  2. Submits initial context: expert system prompt + scan path target.
-  3. Evaluates LLM responses:
-     - If the model returns `ToolCalls`, parses arguments, invokes `toolClient.CallTool`, appends findings as `RoleTool` messages, and continues the loop.
-     - If the model returns a final text report (no `ToolCalls`), terminates the loop.
-  4. Enforces safety limits (`MaxTurns`, default: 10 iterations) to prevent infinite recursion.
-  5. Saves the markdown report to `llm-report.md` (or custom path) and returns the text.
+The `Analyzer` orchestrator executes the agentic feedback loop:
+- **`ToolClient` Interface**: Abstract interface requiring `ListTools` and `CallTool`.
+- **Multi-Turn Loop**:
+  1. Dynamically loads tool schemas from the MCP client.
+  2. Sends initial prompt context to the LLM.
+  3. Evaluates responses:
+     - If tool calls are requested: parses arguments, calls the tool client, appends `RoleTool` findings, and requests the next turn.
+     - If text report is synthesized: saves report to disk (`llm-report.md` by default or custom path) and returns output.
+  4. Enforces execution limits (`MaxTurns`, default 10) to guard against unbounded execution loops.
 
 ---
 
-## 6. Configuration Management ([pkg/config/config.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/config/config.go))
+## 7. Modular CLI Entrypoint Architecture ([main.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/main.go))
 
-The configuration loader unifies settings for both Semgrep scanning and LLM operations from `.env` files and system environment variables:
-
-### Configuration Schema
-```go
-type Config struct {
-    Semgrep SemgrepConfig
-    LLM     LLMConfig
-}
-
-type LLMConfig struct {
-    Provider     string // openai, anthropic, gemini (default: openai)
-    Model        string // Model identifier (e.g. gpt-4o-mini, claude-3-5-sonnet-latest, gemini-2.5-flash)
-    OpenAIKey    string // OPENAI_API_KEY
-    AnthropicKey string // ANTHROPIC_API_KEY
-    GeminiKey    string // GEMINI_API_KEY
-}
-```
-
-### Resolution Logic & Defaults
-- **Case-Insensitive Normalization**: `provider` and `model` values are trimmed and converted to lowercase.
-- **Default Models**:
-  - `openai` $\rightarrow$ `gpt-4o-mini`
-  - `anthropic` $\rightarrow$ `claude-3-5-sonnet-latest`
-  - `gemini` $\rightarrow$ `gemini-2.5-flash`
+The entrypoint is organized into distinct, testable components:
+- **`parseCLIArgs(args []string) cliOptions`**: Pure CLI argument parser handling subcommands (`mcp`, `analyze`, `scan`) and positional scan paths. Tested in [main_test.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/main_test.go).
+- **`runMCP(ctx context.Context, cfg *config.SemgrepConfig) error`**: MCP server runner.
+- **`runAnalyze(ctx context.Context, cfg *config.Config, scanPath string) error`**: LLM analysis runner.
+- **`runScan(ctx context.Context, cfg *config.SemgrepConfig, scanPath string) error`**: Direct Semgrep scanner runner.
+- **`shouldFailBuild(failOn string, results []semgrep.Result) bool`**: Pure evaluation of build failure thresholds (`ERROR`, `WARNING`, `INFO`). Tested in [main_test.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/main_test.go).
 
 ---
 
-## 7. Code Structure
+## 8. Code Structure Map
 
 ```
 security-analyzer/
-├── main.go                     # CLI entrypoint for scan, mcp, and analyze modes
+├── main.go                     # Modular CLI entrypoint & command dispatchers
+├── main_test.go                # Unit tests for CLI parsing & fail policy logic
 ├── pkg/
 │   ├── analyzer/
 │   │   ├── analyzer.go         # Agentic tool calling loop and report persistence
@@ -215,47 +227,43 @@ security-analyzer/
 │   │   ├── config.go           # Unified configuration struct and environment loader
 │   │   └── config_test.go      # Unit tests for Semgrep and LLM configuration
 │   ├── llm/
-│   │   ├── client.go           # Core interfaces (LLMClient, Message, Tool, Response)
+│   │   ├── client.go           # Core interfaces (LLMClient, HTTPClient, Message, Tool)
 │   │   ├── factory/
 │   │   │   ├── factory.go      # Provider constructor factory
 │   │   │   └── factory_test.go # Factory unit tests
 │   │   ├── openai/
-│   │   │   ├── openai.go       # OpenAI implementation via go-openai
-│   │   │   └── openai_test.go  # Mock HTTP server unit tests
+│   │   │   ├── openai.go       # OpenAI client & functional options
+│   │   │   ├── translate.go    # OpenAI message & tool translation
+│   │   │   └── openai_test.go  # Unit tests using functional options & mock servers
 │   │   ├── anthropic/
-│   │   │   ├── anthropic.go    # Anthropic Messages API client with turn coalescing
-│   │   │   └── anthropic_test.go # Mock HTTP server unit tests
+│   │   │   ├── anthropic.go    # Anthropic client & functional options
+│   │   │   ├── translate.go    # Anthropic message & tool translation with turn coalescing
+│   │   │   ├── types.go        # Anthropic wire format request/response structs
+│   │   │   └── anthropic_test.go # Unit tests using functional options & mock servers
 │   │   └── gemini/
-│   │       ├── gemini.go       # Google Gemini generateContent client with part coalescing
-│   │       └── gemini_test.go  # Mock HTTP server unit tests
+│   │       ├── gemini.go       # Gemini client & functional options
+│   │       ├── translate.go    # Gemini message & function translation with part coalescing
+│   │       ├── types.go        # Gemini wire format request/response structs
+│   │       └── gemini_test.go  # Unit tests using functional options & mock servers
 │   ├── mcp/
 │   │   ├── client.go           # MCP subprocess client & dynamic tool discovery
 │   │   ├── server.go           # MCP server lifecycle & Stdio transport
-│   │   ├── tools.go            # Tool definitions (semgrep_scan) & safety validator
-│   │   └── tools_test.go       # Path traversal security tests
+│   │   ├── tools.go            # Tool definitions (semgrep_scan) & path safety validator
+│   │   └── tools_test.go       # Path traversal security containment tests
 │   ├── scanner/
 │   │   └── semgrep/            # Semgrep CLI execution and JSON parsing
 │   └── report/                 # Markdown and GitHub step summary reporters
 └── docs/
+    ├── README.md               # Documentation harness index & navigation guide
     └── specs/
         ├── semgrep-integration.md # Semgrep SAST specification
-        └── llm-integration.md     # [This file] LLM integration specification
+        └── llm-integration.md     # [This file] LLM integration & architecture specification
 ```
 
 ---
 
-## 8. Testing Strategy & Quality Assurance
+## 9. Testing & Verification
 
-### Local Unit Testing
-Every package includes exhaustive unit tests that run independently of external API credentials using Go's standard `net/http/httptest` package:
-- **`pkg/llm/openai`**: Tests text completions, tool call requests, multi-turn tool message mappings, and error handling against mock endpoints.
-- **`pkg/llm/anthropic`**: Tests text completions, tool calls, and single/multiple `tool_result` message coalescing.
-- **`pkg/llm/gemini`**: Tests text completions, function calls, and single/multiple `FunctionResponse` part coalescing.
-- **`pkg/llm/factory`**: Tests provider routing, missing key detection, and invalid provider error handling.
-- **`pkg/analyzer`**: Tests single-turn synthesis, multi-turn tool calling, multiple parallel tool calls in one turn, iteration limit termination, and report file generation.
-- **`pkg/config`**: Tests environment variable overrides, defaults, and mixed-case provider strings.
-
-### Quality Commands
 ```bash
 make fmt      # Formats code using goimports and gofumpt
 make vet      # Runs go vet static analysis
