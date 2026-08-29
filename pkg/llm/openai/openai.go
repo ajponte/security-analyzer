@@ -97,51 +97,10 @@ func (c *Client) SetHTTPClient(httpClient *http.Client) {
 
 // GenerateResponse generates a response from the OpenAI chat model.
 func (c *Client) GenerateResponse(ctx context.Context, messages []llm.Message, tools []llm.Tool) (*llm.Response, error) {
-	reqMessages := make([]openai.ChatCompletionMessage, len(messages))
-	for i, m := range messages {
-		var toolCalls []openai.ToolCall
-		if len(m.ToolCalls) > 0 {
-			toolCalls = make([]openai.ToolCall, len(m.ToolCalls))
-			for j, tc := range m.ToolCalls {
-				toolCalls[j] = openai.ToolCall{
-					ID:   tc.ID,
-					Type: openai.ToolTypeFunction,
-					Function: openai.FunctionCall{
-						Name:      tc.Name,
-						Arguments: tc.Arguments,
-					},
-				}
-			}
-		}
-
-		reqMessages[i] = openai.ChatCompletionMessage{
-			Role:       string(m.Role),
-			Content:    m.Content,
-			Name:       m.Name,
-			ToolCalls:  toolCalls,
-			ToolCallID: m.ToolCallID,
-		}
-	}
-
-	var reqTools []openai.Tool
-	if len(tools) > 0 {
-		reqTools = make([]openai.Tool, len(tools))
-		for i, t := range tools {
-			reqTools[i] = openai.Tool{
-				Type: openai.ToolTypeFunction,
-				Function: &openai.FunctionDefinition{
-					Name:        t.Name,
-					Description: t.Description,
-					Parameters:  t.Parameters,
-				},
-			}
-		}
-	}
-
 	req := openai.ChatCompletionRequest{
 		Model:    c.model,
-		Messages: reqMessages,
-		Tools:    reqTools,
+		Messages: translateMessages(messages),
+		Tools:    translateTools(tools),
 	}
 
 	resp, err := c.client.CreateChatCompletion(ctx, req)
@@ -154,21 +113,8 @@ func (c *Client) GenerateResponse(ctx context.Context, messages []llm.Message, t
 	}
 
 	choice := resp.Choices[0]
-
-	var resToolCalls []llm.ToolCall
-	if len(choice.Message.ToolCalls) > 0 {
-		resToolCalls = make([]llm.ToolCall, len(choice.Message.ToolCalls))
-		for i, tc := range choice.Message.ToolCalls {
-			resToolCalls[i] = llm.ToolCall{
-				ID:        tc.ID,
-				Name:      tc.Function.Name,
-				Arguments: tc.Function.Arguments,
-			}
-		}
-	}
-
 	return &llm.Response{
 		Content:   choice.Message.Content,
-		ToolCalls: resToolCalls,
+		ToolCalls: translateResponseToolCalls(choice.Message.ToolCalls),
 	}, nil
 }

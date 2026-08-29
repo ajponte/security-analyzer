@@ -17,53 +17,18 @@ func translateMessages(messages []llm.Message) (string, []anthropicMessage, erro
 	for _, m := range messages {
 		switch m.Role {
 		case llm.RoleSystem:
-			if system != "" {
-				system += "\n"
-			}
-			system += m.Content
+			system = appendSystemText(system, m.Content)
 
 		case llm.RoleUser:
-			out = append(out, anthropicMessage{
-				Role:    "user",
-				Content: []anthropicContent{{Type: "text", Text: m.Content}},
-			})
+			out = append(out, translateUserMessage(m.Content))
 
 		case llm.RoleAssistant:
-			var blocks []anthropicContent
-			if m.Content != "" {
-				blocks = append(blocks, anthropicContent{Type: "text", Text: m.Content})
+			if msg, ok := translateAssistantMessage(m.Content, m.ToolCalls); ok {
+				out = append(out, msg)
 			}
-			for _, tc := range m.ToolCalls {
-				raw := json.RawMessage(tc.Arguments)
-				if len(raw) == 0 {
-					raw = json.RawMessage("{}")
-				}
-				blocks = append(blocks, anthropicContent{
-					Type:  "tool_use",
-					ID:    tc.ID,
-					Name:  tc.Name,
-					Input: raw,
-				})
-			}
-			if len(blocks) == 0 {
-				continue
-			}
-			out = append(out, anthropicMessage{Role: "assistant", Content: blocks})
 
 		case llm.RoleTool:
-			toolBlock := anthropicContent{
-				Type:      "tool_result",
-				ToolUseID: m.ToolCallID,
-				Content:   m.Content,
-			}
-			if len(out) > 0 && out[len(out)-1].Role == "user" {
-				out[len(out)-1].Content = append(out[len(out)-1].Content, toolBlock)
-			} else {
-				out = append(out, anthropicMessage{
-					Role:    "user",
-					Content: []anthropicContent{toolBlock},
-				})
-			}
+			out = appendToolResultMessage(out, m.ToolCallID, m.Content)
 
 		default:
 			return "", nil, fmt.Errorf("unsupported message role: %q", m.Role)
@@ -71,6 +36,69 @@ func translateMessages(messages []llm.Message) (string, []anthropicMessage, erro
 	}
 
 	return system, out, nil
+}
+
+func appendSystemText(existing, addition string) string {
+	if existing != "" {
+		return existing + "\n" + addition
+	}
+	return addition
+}
+
+func translateUserMessage(content string) anthropicMessage {
+	return anthropicMessage{
+		Role: "user",
+		Content: []anthropicContent{
+			{Type: "text", Text: content},
+		},
+	}
+}
+
+func translateAssistantMessage(content string, toolCalls []llm.ToolCall) (anthropicMessage, bool) {
+	var blocks []anthropicContent
+	if content != "" {
+		blocks = append(blocks, anthropicContent{Type: "text", Text: content})
+	}
+	for _, tc := range toolCalls {
+		blocks = append(blocks, translateToolCall(tc))
+	}
+	if len(blocks) == 0 {
+		return anthropicMessage{}, false
+	}
+	return anthropicMessage{Role: "assistant", Content: blocks}, true
+}
+
+func translateToolCall(tc llm.ToolCall) anthropicContent {
+	raw := json.RawMessage(tc.Arguments)
+	if len(raw) == 0 {
+		raw = json.RawMessage("{}")
+	}
+	return anthropicContent{
+		Type:  "tool_use",
+		ID:    tc.ID,
+		Name:  tc.Name,
+		Input: raw,
+	}
+}
+
+func appendToolResultMessage(out []anthropicMessage, toolUseID, content string) []anthropicMessage {
+	toolBlock := anthropicContent{
+		Type:      "tool_result",
+		ToolUseID: toolUseID,
+		Content:   content,
+	}
+
+	// Coalesce into preceding user turn if present, respecting Anthropic role alternation.
+	if len(out) > 0 && out[len(out)-1].Role == "user" {
+		lastIdx := len(out) - 1
+		out[lastIdx].Content = append(out[lastIdx].Content, toolBlock)
+		return out
+	}
+
+	return append(out, anthropicMessage{
+		Role:    "user",
+		Content: []anthropicContent{toolBlock},
+	})
 }
 
 // translateTools converts llm.Tool definitions into Anthropic tool declarations.

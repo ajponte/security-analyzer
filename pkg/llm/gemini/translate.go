@@ -17,58 +17,18 @@ func translateMessages(messages []llm.Message) (string, []geminiContent, error) 
 	for _, m := range messages {
 		switch m.Role {
 		case llm.RoleSystem:
-			if system != "" {
-				system += "\n"
-			}
-			system += m.Content
+			system = appendSystemText(system, m.Content)
 
 		case llm.RoleUser:
-			out = append(out, geminiContent{
-				Role:  "user",
-				Parts: []geminiPart{{Text: m.Content}},
-			})
+			out = append(out, translateUserContent(m.Content))
 
 		case llm.RoleAssistant:
-			var parts []geminiPart
-			if m.Content != "" {
-				parts = append(parts, geminiPart{Text: m.Content})
+			if content, ok := translateModelContent(m.Content, m.ToolCalls); ok {
+				out = append(out, content)
 			}
-			for _, tc := range m.ToolCalls {
-				raw := json.RawMessage(tc.Arguments)
-				if len(raw) == 0 {
-					raw = json.RawMessage("{}")
-				}
-				parts = append(parts, geminiPart{
-					FunctionCall: &geminiFunctionCall{
-						Name: tc.Name,
-						Args: raw,
-					},
-				})
-			}
-			if len(parts) == 0 {
-				continue
-			}
-			out = append(out, geminiContent{Role: "model", Parts: parts})
 
 		case llm.RoleTool:
-			name := m.Name
-			if name == "" {
-				name = m.ToolCallID
-			}
-			toolPart := geminiPart{
-				FunctionResponse: &geminiFunctionResponse{
-					Name:     name,
-					Response: map[string]interface{}{"content": m.Content},
-				},
-			}
-			if len(out) > 0 && out[len(out)-1].Role == "user" {
-				out[len(out)-1].Parts = append(out[len(out)-1].Parts, toolPart)
-			} else {
-				out = append(out, geminiContent{
-					Role:  "user",
-					Parts: []geminiPart{toolPart},
-				})
-			}
+			out = appendToolResponseContent(out, m.Name, m.ToolCallID, m.Content)
 
 		default:
 			return "", nil, fmt.Errorf("unsupported message role: %q", m.Role)
@@ -76,6 +36,73 @@ func translateMessages(messages []llm.Message) (string, []geminiContent, error) 
 	}
 
 	return system, out, nil
+}
+
+func appendSystemText(existing, addition string) string {
+	if existing != "" {
+		return existing + "\n" + addition
+	}
+	return addition
+}
+
+func translateUserContent(content string) geminiContent {
+	return geminiContent{
+		Role: "user",
+		Parts: []geminiPart{
+			{Text: content},
+		},
+	}
+}
+
+func translateModelContent(content string, toolCalls []llm.ToolCall) (geminiContent, bool) {
+	var parts []geminiPart
+	if content != "" {
+		parts = append(parts, geminiPart{Text: content})
+	}
+	for _, tc := range toolCalls {
+		parts = append(parts, translateFunctionCallPart(tc))
+	}
+	if len(parts) == 0 {
+		return geminiContent{}, false
+	}
+	return geminiContent{Role: "model", Parts: parts}, true
+}
+
+func translateFunctionCallPart(tc llm.ToolCall) geminiPart {
+	raw := json.RawMessage(tc.Arguments)
+	if len(raw) == 0 {
+		raw = json.RawMessage("{}")
+	}
+	return geminiPart{
+		FunctionCall: &geminiFunctionCall{
+			Name: tc.Name,
+			Args: raw,
+		},
+	}
+}
+
+func appendToolResponseContent(out []geminiContent, name, toolCallID, content string) []geminiContent {
+	if name == "" {
+		name = toolCallID
+	}
+	toolPart := geminiPart{
+		FunctionResponse: &geminiFunctionResponse{
+			Name:     name,
+			Response: map[string]interface{}{"content": content},
+		},
+	}
+
+	// Coalesce into preceding user turn if present, respecting Gemini turn alternation.
+	if len(out) > 0 && out[len(out)-1].Role == "user" {
+		lastIdx := len(out) - 1
+		out[lastIdx].Parts = append(out[lastIdx].Parts, toolPart)
+		return out
+	}
+
+	return append(out, geminiContent{
+		Role:  "user",
+		Parts: []geminiPart{toolPart},
+	})
 }
 
 func translateTools(tools []llm.Tool) []geminiTool {
