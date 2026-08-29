@@ -26,6 +26,8 @@ lint: ## lint the go code using golangci-lint
 test: ## run unit tests
 	go test -v ./...
 
+tests: test ## alias for `test`
+
 
 clean: ## cleans binary and other generated files
 	go clean
@@ -42,7 +44,7 @@ tidy: ## runs tidy to fix go.mod dependencies
 
 
 
-.PHONY: help
+.PHONY: help test tests
 ## Help
 help: ## Show this help.
 	@echo ''

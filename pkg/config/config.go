@@ -3,10 +3,26 @@ package config
 import (
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
 )
+
+// Config holds all configuration for the application including Semgrep and LLM settings.
+type Config struct {
+	Semgrep SemgrepConfig
+	LLM     LLMConfig
+}
+
+// LLMConfig holds configuration for LLM providers.
+type LLMConfig struct {
+	Provider     string
+	Model        string
+	OpenAIKey    string
+	AnthropicKey string
+	GeminiKey    string
+}
 
 // SemgrepConfig holds configuration for the Semgrep scanner
 type SemgrepConfig struct {
@@ -18,8 +34,8 @@ type SemgrepConfig struct {
 }
 
 // LoadConfig loads variables from .env and system environment,
-// checking for the presence of the semgrep binary.
-func LoadConfig() (*SemgrepConfig, error) {
+// checking for the presence of the semgrep binary and populating LLM settings.
+func LoadConfig() (*Config, error) {
 	// Attempt to load .env file.
 	_ = godotenv.Load()
 
@@ -47,11 +63,38 @@ func LoadConfig() (*SemgrepConfig, error) {
 	_, err := exec.LookPath("semgrep")
 	semgrepExists := err == nil
 
-	return &SemgrepConfig{
-		AppToken:      appToken,
-		Rules:         rules,
-		FailOn:        failOn,
-		Timeout:       timeout,
-		SemgrepExists: semgrepExists,
+	// Resolve LLM configuration
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("LLM_PROVIDER")))
+	if provider == "" {
+		provider = "openai"
+	}
+
+	model := strings.TrimSpace(os.Getenv("LLM_MODEL"))
+	if model == "" {
+		switch provider {
+		case "anthropic":
+			model = "claude-3-5-sonnet-latest"
+		case "gemini":
+			model = "gemini-2.5-flash"
+		default:
+			model = "gpt-4o-mini"
+		}
+	}
+
+	return &Config{
+		Semgrep: SemgrepConfig{
+			AppToken:      appToken,
+			Rules:         rules,
+			FailOn:        failOn,
+			Timeout:       timeout,
+			SemgrepExists: semgrepExists,
+		},
+		LLM: LLMConfig{
+			Provider:     provider,
+			Model:        model,
+			OpenAIKey:    os.Getenv("OPENAI_API_KEY"),
+			AnthropicKey: os.Getenv("ANTHROPIC_API_KEY"),
+			GeminiKey:    os.Getenv("GEMINI_API_KEY"),
+		},
 	}, nil
 }

@@ -4,24 +4,22 @@ This guide provides instructions for building, running, testing, and developing 
 
 ## Documentation & Agent Harness
 
-This project contains a comprehensive agent documentation harness under the [docs/](docs) folder. Refer to these files for deeper context.
+This project contains a comprehensive agent documentation harness under the [docs/](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/README.md) folder optimized for AI coding assistants and architects:
+- **[Documentation Harness Index](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/README.md)**: Sitemap, LLM navigation instructions, and architectural principles.
+- **[LLM Integration Specification](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/specs/llm-integration.md)**: Multi-provider abstraction (`OpenAI`, `Anthropic`, `Gemini`), MCP client subprocess model, agentic loop (`pkg/analyzer`), and report generation.
+- **[Semgrep Integration Specification](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/specs/semgrep-integration.md)**: SAST scanner integration, JSON parsing, MCP tool server (`pkg/mcp`), and path traversal containment.
 
 ---
 
 ## Commands
 
 ### Build and Clean
-- **Build application**: `make build` (creates executable in `out/data-loader`)
+- **Build application**: `make build` (creates executable in `out/security-analyzer`)
 - **Clean build artifacts**: `make clean`
 - **Tidy Go modules**: `make tidy`
-- **Vendoring dependencies**: `make vendor`
-
 
 ### Test and Quality
-- **All Quality Checks (Lint, Format)**
-- **Run unit tests**: `make unit-test`
-- **Run tests with JSON output (CI)**: `make test-ci`
-- **Show test coverage in HTML**: `make coverage`
+- **Run unit tests**: `make test`
 - **Format code**: `make fmt` (runs `goimports` and `gofumpt`)
 - **Lint code**: `make lint` (runs `golangci-lint`)
 - **Vet code**: `make vet` (runs `go vet`)
