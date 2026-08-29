@@ -45,9 +45,7 @@ func NewAnalyzer(llmClient llm.LLMClient, toolClient ToolClient, opts ...Options
 		if opts[0].MaxTurns > 0 {
 			opt.MaxTurns = opts[0].MaxTurns
 		}
-		if opts[0].OutputFile != "" {
-			opt.OutputFile = opts[0].OutputFile
-		}
+		opt.OutputFile = opts[0].OutputFile
 	}
 
 	return &Analyzer{

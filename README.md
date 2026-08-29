@@ -28,17 +28,29 @@ Once the application is built (e.g., via `make build`), it can be executed in th
 
 ---
 
+## Documentation & Agent Harness
+
+This project contains a comprehensive documentation harness under [docs/](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/README.md) optimized for developers, AI assistants, and architects:
+- **[docs/README.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/README.md)**: Harness index, LLM navigation guide, and architectural design principles.
+- **[docs/specs/llm-integration.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/specs/llm-integration.md)**: Architectural specification for LLM integration, multi-provider abstraction (`OpenAI`, `Anthropic`, `Gemini`), MCP client subprocess model, and agentic analysis engine.
+- **[docs/specs/semgrep-integration.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/specs/semgrep-integration.md)**: Architectural specification for Semgrep SAST scanner, MCP server mode, path traversal sandboxing, and reporting.
+- **[AGENTS.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/AGENTS.md)**: Instructions, commands, and rules for autonomous AI coding agents.
+
+---
+
 ## Configuration
 
-The application is configured using environment variables (which are loaded by [pkg/config/config.go](file:///Users/aponte/personal_workspace/security-analyzer/pkg/config/config.go) and processed in [main.go](file:///Users/aponte/personal_workspace/security-analyzer/main.go)). You can also place these variables in a `.env` file at the root of the workspace.
+The application is configured using environment variables (which are loaded by [pkg/config/config.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/config/config.go) and processed in [main.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/main.go)). You can also place these variables in a `.env` file at the root of the workspace.
 
 ### LLM Configurations (for `analyze` mode)
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `LLM_PROVIDER` | The LLM API provider to use (currently supports `openai`). | `openai` |
-| `LLM_MODEL` | The specific model identifier to request. | `gpt-4o-mini` |
-| `OPENAI_API_KEY` | The secret key required to access the OpenAI API. | *(Required if using OpenAI)* |
+| `LLM_PROVIDER` | The LLM API provider (`openai`, `anthropic`, `gemini`). | `openai` |
+| `LLM_MODEL` | The specific model identifier (`gpt-4o-mini`, `claude-3-5-sonnet-latest`, `gemini-2.5-flash`). | Provider default |
+| `OPENAI_API_KEY` | Secret API key for OpenAI. | *(Required if using OpenAI)* |
+| `ANTHROPIC_API_KEY` | Secret API key for Anthropic. | *(Required if using Anthropic)* |
+| `GEMINI_API_KEY` | Secret API key for Google Gemini. | *(Required if using Gemini)* |
 
 ### Semgrep Configurations
 

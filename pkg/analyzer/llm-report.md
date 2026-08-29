@@ -1,1 +1,0 @@
-Scan completed for all packages.
