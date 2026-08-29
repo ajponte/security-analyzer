@@ -369,4 +369,4 @@ make help
 ## Continuous Integration & Publishing
 
 - **CI Pipeline ([.github/workflows/ci.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/ci.yml))**: Automatically runs linting, unit tests, and Go builds on push and pull requests to `main`.
-- **Publish Pipeline ([.github/workflows/publish-ecr.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/publish-ecr.yml))**: Builds multi-stage container images and publishes to AWS Private ECR (`615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer` in `us-west-2`) with OIDC/IAM authentication and semantic version tags.
+- **Publish Pipeline ([.github/workflows/publish-ecr.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/publish-ecr.yml))**: Builds multi-stage container images and publishes to AWS Private ECR (`615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer` in `us-west-2`) with semantic version tags. Requires repository secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for IAM user `aiengineer`.
