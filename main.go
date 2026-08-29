@@ -7,21 +7,29 @@ import (
 	"os"
 	"strings"
 
+	"security-analyzer/pkg/analyzer"
 	"security-analyzer/pkg/config"
+	"security-analyzer/pkg/llm/factory"
 	"security-analyzer/pkg/mcp"
 	"security-analyzer/pkg/report"
 	"security-analyzer/pkg/scanner/semgrep"
 )
 
 func main() {
-	// 1. Determine run mode (MCP or local scan).
+	// 1. Determine run mode (MCP, analyze, or local scan).
 	isMCP := false
+	isAnalyze := false
 	scanPath := "."
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "mcp":
 			isMCP = true
+		case "analyze":
+			isAnalyze = true
+			if len(os.Args) > 2 {
+				scanPath = os.Args[2]
+			}
 		case "scan":
 			if len(os.Args) > 2 {
 				scanPath = os.Args[2]
@@ -32,7 +40,7 @@ func main() {
 		}
 	}
 
-	// 2. Load Configuration.
+	// 2. Load Configuration (loads .env and checks PATH).
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
@@ -42,12 +50,57 @@ func main() {
 	// 3. Execution based on mode.
 	if isMCP {
 		// Run in MCP mode.
-		server := mcp.NewServer(cfg)
+		server := mcp.NewServer(&cfg.Semgrep)
 		ctx := context.Background()
 		if err := server.Start(ctx); err != nil {
 			slog.Error("MCP server terminated with error", "error", err)
 			os.Exit(1)
 		}
+	} else if isAnalyze {
+		// Set up standard CLI logger to output to os.Stdout.
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+		slog.SetDefault(logger)
+
+		slog.Info("Starting LLM-driven security analysis", "path", scanPath, "provider", cfg.LLM.Provider, "model", cfg.LLM.Model)
+
+		// Instantiate LLM client via unified factory.
+		llmClient, err := factory.NewClient(&cfg.LLM)
+		if err != nil {
+			slog.Error("Failed to initialize LLM client", "error", err)
+			os.Exit(1)
+		}
+
+		// Find current executable's own path to spawn MCP subprocess.
+		selfPath, err := os.Executable()
+		if err != nil {
+			slog.Error("Failed to find self executable path", "error", err)
+			os.Exit(1)
+		}
+
+		// Start MCP client.
+		mcpClient, err := mcp.NewMCPClient(selfPath)
+		if err != nil {
+			slog.Error("Failed to initialize MCP client", "error", err)
+			os.Exit(1)
+		}
+		defer func() {
+			_ = mcpClient.Close()
+		}()
+
+		// Execute analysis through analyzer orchestrator.
+		az := analyzer.NewAnalyzer(llmClient, mcpClient)
+		ctx := context.Background()
+		reportContent, err := az.Analyze(ctx, scanPath)
+		if err != nil {
+			slog.Error("Security analysis failed", "error", err)
+			os.Exit(1)
+		}
+
+		// Print final report to stdout.
+		fmt.Println(reportContent)
+
 	} else {
 		// Set up standard CLI logger to output to os.Stdout.
 		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -57,13 +110,13 @@ func main() {
 
 		slog.Info("Starting Semgrep security scan", "path", scanPath)
 
-		if !cfg.SemgrepExists {
+		if !cfg.Semgrep.SemgrepExists {
 			slog.Error("semgrep CLI is not installed or not found in system PATH. Please install semgrep before scanning.")
 			os.Exit(1)
 		}
 
 		// Run local scan.
-		scanner := semgrep.NewSemgrepScanner(cfg)
+		scanner := semgrep.NewSemgrepScanner(&cfg.Semgrep)
 		ctx := context.Background()
 		reportData, err := scanner.Scan(ctx, scanPath)
 		if err != nil {
@@ -92,7 +145,7 @@ func main() {
 
 		// Check build failure policy.
 		shouldFail := false
-		failOn := strings.ToUpper(cfg.FailOn)
+		failOn := strings.ToUpper(cfg.Semgrep.FailOn)
 
 		for _, res := range reportData.Results {
 			severity := strings.ToUpper(res.Extra.Severity)

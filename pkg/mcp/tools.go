@@ -7,15 +7,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"security-analyzer/pkg/config"
 	"security-analyzer/pkg/scanner/semgrep"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ScanArguments holds the input parameters for the semgrep_scan tool.
 type ScanArguments struct {
-	Path  string `json:"path" jsonschema:"description=Absolute or relative path to the directory or repository that needs to be scanned"`
-	Rules string `json:"rules,omitempty" jsonschema:"description=A comma-separated list of rule names or paths (e.g. p/default,p/golang). If omitted, uses default config"`
+	Path  string `json:"path" jsonschema:"Absolute or relative path to the directory or repository that needs to be scanned"`
+	Rules string `json:"rules,omitempty" jsonschema:"A comma-separated list of rule names or paths (e.g. p/default,p/golang). If omitted, uses default config"`
 }
 
 // isSafePath checks if targetPath is within the allowedWorkspace directory.

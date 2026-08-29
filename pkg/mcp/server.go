@@ -5,8 +5,9 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"security-analyzer/pkg/config"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Server represents the MCP Server instance and its state.
