@@ -1,0 +1,76 @@
+name: 'Security Analyzer'
+description: 'AI-driven SAST scanner combining Semgrep analysis and LLM security audits'
+author: 'ajponte'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  mode:
+    description: 'Execution mode: "scan" (direct Semgrep SAST) or "analyze" (agentic LLM audit)'
+    required: false
+    default: 'scan'
+  scan_path:
+    description: 'Target repository directory or file path to scan'
+    required: false
+    default: '.'
+  provider:
+    description: 'LLM Provider for analyze mode: "openai", "anthropic", or "gemini"'
+    required: false
+    default: 'openai'
+  model:
+    description: 'Model identifier override (e.g., "gpt-4o-mini", "claude-3-5-sonnet-latest", "gemini-2.5-flash")'
+    required: false
+    default: ''
+  openai_api_key:
+    description: 'API key for OpenAI (required if provider is openai)'
+    required: false
+    default: ''
+  anthropic_api_key:
+    description: 'API key for Anthropic (required if provider is anthropic)'
+    required: false
+    default: ''
+  gemini_api_key:
+    description: 'API key for Google Gemini (required if provider is gemini)'
+    required: false
+    default: ''
+  rules:
+    description: 'Semgrep ruleset configuration (e.g., "auto", "p/golang", "p/security-audit")'
+    required: false
+    default: 'auto'
+  fail_on:
+    description: 'Severity failure threshold: "ERROR", "WARNING", or "INFO"'
+    required: false
+    default: 'ERROR'
+  timeout:
+    description: 'Maximum scan timeout duration (e.g., "5m", "10m")'
+    required: false
+    default: '10m'
+  semgrep_app_token:
+    description: 'Optional Semgrep Cloud Platform App Token'
+    required: false
+    default: ''
+
+outputs:
+  scan_id:
+    description: 'Unique identifier for the scan execution'
+  report_path:
+    description: 'Path to generated Markdown report file'
+  status:
+    description: 'Execution exit status ("success" or "failure")'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  env:
+    INPUT_MODE: ${{ inputs.mode }}
+    INPUT_SCAN_PATH: ${{ inputs.scan_path }}
+    INPUT_PROVIDER: ${{ inputs.provider }}
+    INPUT_MODEL: ${{ inputs.model }}
+    INPUT_OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+    INPUT_ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+    INPUT_GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
+    INPUT_RULES: ${{ inputs.rules }}
+    INPUT_FAIL_ON: ${{ inputs.fail_on }}
+    INPUT_TIMEOUT: ${{ inputs.timeout }}
+    INPUT_SEMGREP_APP_TOKEN: ${{ inputs.semgrep_app_token }}

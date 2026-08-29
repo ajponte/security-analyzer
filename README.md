@@ -1,10 +1,122 @@
 # security-analyzer
 
-LLM-based security scans.
+AI-driven SAST scanner combining Semgrep static analysis and LLM-based security audits for local workflows and GitHub Actions.
+
+---
+
+## GitHub Action Usage
+
+`security-analyzer` is available as a containerized GitHub Action that executes Semgrep SAST scans and agentic LLM audits directly inside your CI/CD pipeline without needing to manually install Go, Python, or Semgrep dependencies.
+
+### Example 1: Fast SAST Scan on Pull Requests
+
+Run static application security testing on code changes and upload the scan report:
+
+```yaml
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  sast:
+    name: Fast SAST Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Security Analyzer
+        id: security_scan
+        uses: ajponte/security-analyzer@v1
+        with:
+          mode: 'scan'
+          scan_path: '.'
+          rules: 'auto'
+          fail_on: 'ERROR'
+          timeout: '5m'
+
+      - name: Upload Scan Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report
+          path: report.md
+          retention-days: 14
+```
+
+### Example 2: Agentic LLM Security Audit
+
+Run an AI-driven security audit synthesizing Semgrep findings with multi-turn LLM reasoning:
+
+```yaml
+name: AI Security Audit
+
+on:
+  schedule:
+    - cron: '0 3 * * 1' # Weekly on Monday at 3:00 AM UTC
+  workflow_dispatch:
+
+jobs:
+  ai-audit:
+    name: Deep LLM Security Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run AI Security Analysis
+        id: ai_scan
+        uses: ajponte/security-analyzer@v1
+        with:
+          mode: 'analyze'
+          scan_path: '.'
+          provider: 'anthropic'
+          model: 'claude-3-5-sonnet-latest'
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          fail_on: 'ERROR'
+
+      - name: Upload AI Analysis Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-security-reports
+          path: llm-reports/
+          retention-days: 30
+```
+
+### Action Inputs
+
+| Input | Description | Required | Default |
+| --- | --- | --- | --- |
+| `mode` | Execution mode: `scan` (direct Semgrep SAST) or `analyze` (agentic LLM audit). | No | `scan` |
+| `scan_path` | Target repository directory or file path to scan. | No | `.` |
+| `provider` | LLM provider for analyze mode: `openai`, `anthropic`, or `gemini`. | No | `openai` |
+| `model` | Model identifier override (e.g., `gpt-4o-mini`, `claude-3-5-sonnet-latest`, `gemini-2.5-flash`). | No | `""` |
+| `openai_api_key` | Secret API key for OpenAI (required if provider is `openai`). | No | `""` |
+| `anthropic_api_key` | Secret API key for Anthropic (required if provider is `anthropic`). | No | `""` |
+| `gemini_api_key` | Secret API key for Google Gemini (required if provider is `gemini`). | No | `""` |
+| `rules` | Semgrep ruleset configuration (e.g., `auto`, `p/golang`, `p/security-audit`). | No | `auto` |
+| `fail_on` | Severity failure threshold: `ERROR`, `WARNING`, or `INFO`. | No | `ERROR` |
+| `timeout` | Maximum scan timeout duration (e.g., `5m`, `10m`). | No | `10m` |
+| `semgrep_app_token` | Optional Semgrep Cloud Platform App Token. | No | `""` |
+
+### Action Outputs
+
+| Output | Description |
+| --- | --- |
+| `scan_id` | Unique identifier for the scan execution (e.g., `scan-20260828-190000-abcdef12`). |
+| `report_path` | File path to the generated Markdown report (`report.md` or `llm-reports/<scan_id>.md`). |
+| `status` | Execution exit status (`success` or `failure`). |
+
+---
 
 ## Command-Line Usage
 
-Once the application is built (e.g., via `make build`), it can be executed in three modes via [main.go](file:///Users/aponte/personal_workspace/security-analyzer/main.go):
+Once the application is built (e.g., via `make build`), it can be executed in three modes via [main.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/main.go):
 
 1. **Local Scan**:
    ```bash
@@ -28,12 +140,35 @@ Once the application is built (e.g., via `make build`), it can be executed in th
 
 ---
 
+## Docker Usage
+
+You can also build and run the Docker container locally:
+
+```bash
+# Build the container image
+docker build -t security-analyzer:latest .
+
+# Run a SAST scan
+docker run --rm -v "$(pwd):/github/workspace" security-analyzer:latest scan .
+
+# Run an AI security audit
+docker run --rm \
+  -v "$(pwd):/github/workspace" \
+  -e INPUT_MODE="analyze" \
+  -e INPUT_PROVIDER="openai" \
+  -e INPUT_OPENAI_API_KEY="$OPENAI_API_KEY" \
+  security-analyzer:latest
+```
+
+---
+
 ## Documentation & Agent Harness
 
 This project contains a comprehensive documentation harness under [docs/](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/README.md) optimized for developers, AI assistants, and architects:
 - **[docs/README.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/README.md)**: Harness index, LLM navigation guide, and architectural design principles.
 - **[docs/specs/llm-integration.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/specs/llm-integration.md)**: Architectural specification for LLM integration, multi-provider abstraction (`OpenAI`, `Anthropic`, `Gemini`), MCP client subprocess model, and agentic analysis engine.
 - **[docs/specs/semgrep-integration.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/specs/semgrep-integration.md)**: Architectural specification for Semgrep SAST scanner, MCP server mode, path traversal sandboxing, and reporting.
+- **[agent-docs/GHA-DOCKER.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/agent-docs/GHA-DOCKER.md)**: Containerization, GitHub Actions distribution, and AWS ECR publishing architecture.
 - **[AGENTS.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/AGENTS.md)**: Instructions, commands, and rules for autonomous AI coding agents.
 
 ---
@@ -63,7 +198,6 @@ The application is configured using environment variables (which are loaded by [
 
 ---
 
-
 ## Development
 
 This project uses a Makefile to manage build, run, lint, and formatting tasks.
@@ -83,22 +217,9 @@ For a complete list of all make targets, run:
 make help
 ```
 
-## Continuous Integration (CI)
+---
 
-A GitHub Actions CI workflow is configured in [.github/workflows/ci.yml](file:///Users/aponte/personal_workspace/security-analyzer/.github/workflows/ci.yml).
+## Continuous Integration & Publishing
 
-### Workflow Triggers
-
-The CI pipeline runs on:
-- **Pushes** to the `main` branch.
-- **Pull requests** targeting the `main` branch.
-
-### Workflow Pipeline
-
-The workflow runs a single sequential **`build`** job on an Ubuntu runner:
-
-1. **Checkout**: Checks out the repository code.
-2. **Go Setup**: Configures the Go environment (version `1.25`).
-3. **Lint**: Runs `golangci-lint` using `golangci/golangci-lint-action@v9` (configured with version `v2.9.0`) to inspect code quality and conventions.
-4. **Build**: Executes `make build` to verify the application compiles successfully and outputs the binary.
-5. **Test**: Executes `make test` to run all unit tests and verify correctness.
+- **CI Pipeline ([.github/workflows/ci.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/ci.yml))**: Automatically runs linting, unit tests, and Go builds on push and pull requests to `main`.
+- **Publish Pipeline ([.github/workflows/publish-ecr.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/publish-ecr.yml))**: Builds multi-stage container images and publishes to AWS Public ECR with OIDC authentication and semantic version tags.

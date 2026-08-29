@@ -34,4 +34,5 @@ go.work.sum
 
 # Locally generated reports
 llm-reports/
+report.md
 

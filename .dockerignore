@@ -1,0 +1,15 @@
+.git
+.github
+.claude
+.gemini
+out/
+llm-reports/
+report.md
+.env
+.env.*
+agent-docs/
+docs/
+*.log
+*.tmp
+*.out
+.DS_Store
