@@ -44,6 +44,12 @@ func TestParseCLIArgs(t *testing.T) {
 			wantPath: ".",
 		},
 		{
+			name:     "mcp subcommand with path",
+			args:     []string{"security-analyzer", "mcp", "/target/repo"},
+			wantMode: modeMCP,
+			wantPath: "/target/repo",
+		},
+		{
 			name:     "analyze subcommand with path",
 			args:     []string{"security-analyzer", "analyze", "./internal"},
 			wantMode: modeAnalyze,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"security-analyzer/pkg/config"
 )
@@ -27,15 +28,32 @@ func (s *SemgrepScanner) Scan(ctx context.Context, targetPath string) (*ScanRepo
 		return nil, fmt.Errorf("semgrep CLI is not installed or not found in system PATH")
 	}
 
+	// Configure execution context timeout.
+	if s.cfg.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.cfg.Timeout)
+		defer cancel()
+	}
+
 	// Prepare command arguments.
 	args := []string{"scan", "--json", fmt.Sprintf("--config=%s", s.cfg.Rules), targetPath}
 	cmd := exec.CommandContext(ctx, "semgrep", args...)
 
-	// Configure environment variables (including SEMGREP_APP_TOKEN).
-	cmd.Env = os.Environ()
-	if s.cfg.AppToken != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("SEMGREP_APP_TOKEN=%s", s.cfg.AppToken))
+	// Configure environment variables (including SEMGREP_APP_TOKEN and integer SEMGREP_TIMEOUT).
+	var env []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "SEMGREP_TIMEOUT=") {
+			env = append(env, e)
+		}
 	}
+	if s.cfg.AppToken != "" {
+		env = append(env, fmt.Sprintf("SEMGREP_APP_TOKEN=%s", s.cfg.AppToken))
+	}
+	if s.cfg.Timeout > 0 {
+		secs := int(s.cfg.Timeout.Seconds())
+		env = append(env, fmt.Sprintf("SEMGREP_TIMEOUT=%d", secs))
+	}
+	cmd.Env = env
 
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer

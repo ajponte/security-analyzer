@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,11 +52,13 @@ func LoadConfig() (*Config, error) {
 		failOn = "ERROR"
 	}
 
-	timeoutStr := os.Getenv("SEMGREP_TIMEOUT")
+	timeoutStr := strings.TrimSpace(os.Getenv("SEMGREP_TIMEOUT"))
 	timeout := 10 * time.Minute
 	if timeoutStr != "" {
 		if parsed, err := time.ParseDuration(timeoutStr); err == nil {
 			timeout = parsed
+		} else if secs, err := strconv.Atoi(timeoutStr); err == nil {
+			timeout = time.Duration(secs) * time.Second
 		}
 	}
 

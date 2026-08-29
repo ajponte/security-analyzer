@@ -18,7 +18,7 @@ type MCPClient struct {
 }
 
 // NewMCPClient spawns the server in a subprocess and connects to it.
-func NewMCPClient(binaryPath string) (*MCPClient, error) {
+func NewMCPClient(binaryPath string, workspace ...string) (*MCPClient, error) {
 	client := mcp.NewClient(
 		&mcp.Implementation{
 			Name:    "security-analyzer-cli-client",
@@ -28,7 +28,11 @@ func NewMCPClient(binaryPath string) (*MCPClient, error) {
 	)
 
 	// Command to start the server.
-	cmd := exec.Command(binaryPath, "mcp")
+	args := []string{"mcp"}
+	if len(workspace) > 0 && workspace[0] != "" {
+		args = append(args, workspace[0])
+	}
+	cmd := exec.Command(binaryPath, args...)
 	cmd.Stderr = os.Stderr // Redirect stderr for debug logs
 	transport := &mcp.CommandTransport{
 		Command: cmd,
