@@ -1,6 +1,9 @@
 package llm
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 // MessageRole defines the role of a message participant.
 type MessageRole string
@@ -35,12 +38,6 @@ type ToolCall struct {
 	Arguments string `json:"arguments"` // JSON arguments
 }
 
-// FunctionCall is included for schema compatibility.
-type FunctionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
-
 // Response represents the LLM response.
 type Response struct {
 	Content   string     `json:"content"`
@@ -50,4 +47,9 @@ type Response struct {
 // LLMClient abstracts communication with AI providers.
 type LLMClient interface {
 	GenerateResponse(ctx context.Context, messages []Message, tools []Tool) (*Response, error)
+}
+
+// HTTPClient abstracts HTTP request execution across LLM providers and tests.
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
 }
