@@ -223,7 +223,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 The GitHub Action definition defines the inputs, outputs, branding, and container runtime bindings:
 
 ```yaml
-name: 'Security Analyzer'
+name: 'AJP Tech Security Analyzer'
 description: 'AI-driven SAST scanner combining Semgrep analysis and LLM security audits'
 author: 'ajponte'
 branding:
@@ -498,10 +498,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Configure AWS Credentials via OIDC
+      - name: Configure AWS Credentials (OIDC or Access Keys)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 

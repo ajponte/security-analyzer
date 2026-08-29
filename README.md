@@ -29,7 +29,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Run Security Analyzer
+      - name: Run AJP Tech Security Analyzer
         id: security_scan
         uses: ajponte/security-analyzer@v1
         with:
@@ -68,7 +68,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Run AI Security Analysis
+      - name: Run AJP Tech Security Analyzer (AI Audit)
         id: ai_scan
         uses: ajponte/security-analyzer@v1
         with:

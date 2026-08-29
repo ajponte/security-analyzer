@@ -17,9 +17,8 @@ permissions:
 
 env:
   AWS_REGION: us-east-1 # AWS Public ECR API endpoint requires us-east-1
-  PUBLIC_ECR_REGISTRY: public.ecr.aws/a1b2c3d4
+  PUBLIC_ECR_REGISTRY: ${{ secrets.PUBLIC_ECR_REGISTRY || vars.PUBLIC_ECR_REGISTRY || 'public.ecr.aws/a1b2c3d4' }}
   IMAGE_NAME: ajp-security-analyzer
-  ROLE_TO_ASSUME: arn:aws:iam::123456789012:role/GitHubActions-ECR-Publisher
 
 jobs:
   build-and-test:
@@ -57,10 +56,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Configure AWS Credentials via OIDC
+      - name: Configure AWS Credentials (OIDC or Access Keys)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
