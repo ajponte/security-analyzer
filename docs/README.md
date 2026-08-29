@@ -32,6 +32,7 @@ flowchart TD
 | :--- | :--- | :--- |
 | **[AGENTS.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/AGENTS.md)** | Autonomous Coding Agents | Developer commands (`make build`, `make test`, `make lint`), PII safety rules, coding guidelines, and repository conventions. |
 | **[README.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/README.md)** | Developers, DevOps, Users | CLI usage modes (`scan`, `mcp`, `analyze`), environment variables, build steps, and CI workflow. |
+| **[agent-docs/PRIVATE-ECR-STRATEGY.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/agent-docs/PRIVATE-ECR-STRATEGY.md)** | DevOps, Security Engineers | AWS Private ECR distribution architecture, IAM policies, and consumer execution recipes. |
 | **[docs/specs/](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/specs)** | AI Engineers, Architects, Developers | Deep architectural specifications for repository features, integrations, protocols, and subsystem designs. |
 
 ---

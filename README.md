@@ -29,7 +29,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Run Security Analyzer
+      - name: Run AJP Tech Security Analyzer
         id: security_scan
         uses: ajponte/security-analyzer@v1
         with:
@@ -68,7 +68,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Run AI Security Analysis
+      - name: Run AJP Tech Security Analyzer (AI Audit)
         id: ai_scan
         uses: ajponte/security-analyzer@v1
         with:
@@ -114,6 +114,146 @@ jobs:
 
 ---
 
+## AWS Private ECR Distribution & Execution
+
+`security-analyzer` is published to **AWS Private ECR** in region **`us-west-2`** for enterprise CI/CD integration:
+
+- **Repository URI**: `615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer`
+- **AWS Region**: `us-west-2`
+- **Repository ARN**: `arn:aws:ecr:us-west-2:615471835001:repository/ajp/security-analyzer`
+- **IAM User**: `arn:aws:iam::615471835001:user/aiengineer` (`AmazonEC2ContainerRegistryPowerUser`)
+
+### Enterprise Consumer Workflow: Fast SAST Scan
+
+Consuming repositories authenticate using AWS OIDC (or IAM access keys) and run the private container directly:
+
+```yaml
+name: Security SAST Gate (Private ECR)
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+permissions:
+  id-token: write # Required for AWS OIDC authentication
+  contents: read
+
+jobs:
+  sast:
+    name: Fast SAST Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::615471835001:role/GitHubConsumer-SecurityAnalyzer-Pull
+          aws-region: us-west-2
+          audience: sts.amazonaws.com
+
+      - name: Log in to AWS Private ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Run Security Analyzer Container
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/github/workspace" \
+            -e GITHUB_STEP_SUMMARY="/github/workspace/step-summary.md" \
+            -e INPUT_MODE="scan" \
+            -e INPUT_SCAN_PATH="." \
+            -e INPUT_RULES="auto" \
+            -e INPUT_FAIL_ON="ERROR" \
+            -e INPUT_TIMEOUT="5m" \
+            615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer:latest
+
+      - name: Append Job Summary
+        if: always()
+        run: |
+          if [[ -f "${{ github.workspace }}/step-summary.md" ]]; then
+            cat "${{ github.workspace }}/step-summary.md" >> $GITHUB_STEP_SUMMARY
+            rm -f "${{ github.workspace }}/step-summary.md"
+          fi
+
+      - name: Archive SAST Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-report
+          path: report.md
+          retention-days: 14
+```
+
+### Enterprise Consumer Workflow: Deep AI Security Audit
+
+```yaml
+name: AI Security Audit (Private ECR)
+
+on:
+  schedule:
+    - cron: '0 3 * * 1' # Every Monday at 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  audit:
+    name: Deep LLM Security Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::615471835001:role/GitHubConsumer-SecurityAnalyzer-Pull
+          aws-region: us-west-2
+          audience: sts.amazonaws.com
+
+      - name: Log in to AWS Private ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Run AI Security Analysis
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/github/workspace" \
+            -e GITHUB_STEP_SUMMARY="/github/workspace/step-summary.md" \
+            -e INPUT_MODE="analyze" \
+            -e INPUT_SCAN_PATH="." \
+            -e INPUT_PROVIDER="anthropic" \
+            -e INPUT_MODEL="claude-3-5-sonnet-latest" \
+            -e INPUT_ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
+            -e INPUT_FAIL_ON="ERROR" \
+            615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer:latest
+
+      - name: Append Job Summary
+        if: always()
+        run: |
+          if [[ -f "${{ github.workspace }}/step-summary.md" ]]; then
+            cat "${{ github.workspace }}/step-summary.md" >> $GITHUB_STEP_SUMMARY
+            rm -f "${{ github.workspace }}/step-summary.md"
+          fi
+
+      - name: Archive AI Security Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-security-reports
+          path: llm-reports/
+          retention-days: 30
+```
+
+---
+
 ## Command-Line Usage
 
 Once the application is built (e.g., via `make build`), it can be executed in three modes via [main.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/main.go):
@@ -142,33 +282,40 @@ Once the application is built (e.g., via `make build`), it can be executed in th
 
 ## Docker Usage
 
-You can also build and run the Docker container locally:
+You can build and run the Docker container locally, or pull the private container directly:
 
 ```bash
-# Build the container image
+# Build the container image locally
 docker build -t ajp-security-analyzer:latest .
 
-# Run a SAST scan
+# Run a local SAST scan
 docker run --rm -v "$(pwd):/github/workspace" ajp-security-analyzer:latest scan .
 
-# Run an AI security audit
+# Run an AI security audit locally
 docker run --rm \
   -v "$(pwd):/github/workspace" \
   -e INPUT_MODE="analyze" \
   -e INPUT_PROVIDER="openai" \
   -e INPUT_OPENAI_API_KEY="$OPENAI_API_KEY" \
   ajp-security-analyzer:latest
+
+# Or pull & run from AWS Private ECR (requires prior ECR login in us-west-2)
+docker run --rm \
+  -v "$(pwd):/github/workspace" \
+  615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer:latest
 ```
 
 ---
 
 ## Documentation & Agent Harness
 
-This project contains a comprehensive documentation harness under [docs/](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/README.md) optimized for developers, AI assistants, and architects:
+This project contains a comprehensive documentation harness under [docs/](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/README.md) and [agent-docs/](file:///Users/aponte/personal_workspace/repos/security-analyzer/agent-docs/PRIVATE-ECR-STRATEGY.md) optimized for developers, AI assistants, and architects:
 - **[docs/README.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/README.md)**: Harness index, LLM navigation guide, and architectural design principles.
+- **[agent-docs/PRIVATE-ECR-STRATEGY.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/agent-docs/PRIVATE-ECR-STRATEGY.md)**: Production AWS Private ECR deployment architecture, IAM policies, and consumer integration recipes.
+- **[agent-docs/GHA-DOCKER.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/agent-docs/GHA-DOCKER.md)**: Containerization, GitHub Actions distribution, and AWS ECR publishing architecture.
+- **[docs/specs/docker-gha-integration.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/specs/docker-gha-integration.md)**: Architectural specification for Docker packaging, GitHub Action interface, and AWS ECR distribution.
 - **[docs/specs/llm-integration.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/specs/llm-integration.md)**: Architectural specification for LLM integration, multi-provider abstraction (`OpenAI`, `Anthropic`, `Gemini`), MCP client subprocess model, and agentic analysis engine.
 - **[docs/specs/semgrep-integration.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/docs/specs/semgrep-integration.md)**: Architectural specification for Semgrep SAST scanner, MCP server mode, path traversal sandboxing, and reporting.
-- **[agent-docs/GHA-DOCKER.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/agent-docs/GHA-DOCKER.md)**: Containerization, GitHub Actions distribution, and AWS ECR publishing architecture.
 - **[AGENTS.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/AGENTS.md)**: Instructions, commands, and rules for autonomous AI coding agents.
 
 ---
@@ -222,4 +369,4 @@ make help
 ## Continuous Integration & Publishing
 
 - **CI Pipeline ([.github/workflows/ci.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/ci.yml))**: Automatically runs linting, unit tests, and Go builds on push and pull requests to `main`.
-- **Publish Pipeline ([.github/workflows/publish-ecr.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/publish-ecr.yml))**: Builds multi-stage container images and publishes to AWS Public ECR with OIDC authentication and semantic version tags.
+- **Publish Pipeline ([.github/workflows/publish-ecr.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/publish-ecr.yml))**: Builds multi-stage container images and publishes to AWS Private ECR (`615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer` in `us-west-2`) with OIDC/IAM authentication and semantic version tags.

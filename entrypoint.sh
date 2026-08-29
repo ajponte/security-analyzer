@@ -7,7 +7,7 @@ set -euo pipefail
 
 print_banner() {
   echo "========================================================"
-  echo "  🛡️ Running Security Analyzer GitHub Action"
+  echo "  🛡️ Running AJP Tech Security Analyzer GitHub Action"
   echo "========================================================"
 }
 

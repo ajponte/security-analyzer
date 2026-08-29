@@ -10,7 +10,7 @@ This specification defines the formal architectural design, container encapsulat
 - **Zero-Dependency Runner Execution**: Run seamlessly on standard GitHub-hosted (`ubuntu-latest`) and self-hosted runners without pre-installed Go, Python, or Semgrep runtimes.
 - **Dual-Mode System Topology**: Support both high-throughput deterministic SAST gates (`scan` mode) and deep contextual AI audits (`analyze` mode) through a single unified interface.
 - **Strict Container Isolation & Containment**: Enforce file-system boundaries, path traversal protections, and safe workspace access under GitHub Actions runner UID/GID mappings.
-- **Phased Regional ECR Distribution**: Provide zero-auth anonymous pulls via AWS Public ECR (`us-east-1`) in Phase 1, and migrate to authenticated enterprise distribution via AWS Private ECR in `us-west-2` with AWS IAM OpenID Connect (OIDC) federation in Phase 2.
+- **Enterprise Private & Phased ECR Distribution**: Establish private distribution via AWS Private ECR (`615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer`) in `us-west-2` with AWS IAM OpenID Connect (OIDC) federation and IAM user (`arn:aws:iam::615471835001:user/aiengineer`) access, with public registry backwards compatibility.
 - **Automated CI/CD Release Publishing**: Orchestrate multi-architecture Buildx image builds, layer caching, semantic version tagging, and automated ECR publishing via GitHub Actions OIDC workflows.
 
 ---
@@ -223,7 +223,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 The GitHub Action definition defines the inputs, outputs, branding, and container runtime bindings:
 
 ```yaml
-name: 'Security Analyzer'
+name: 'AJP Tech Security Analyzer'
 description: 'AI-driven SAST scanner combining Semgrep analysis and LLM security audits'
 author: 'ajponte'
 branding:
@@ -336,110 +336,80 @@ flowchart TD
 
 ## 5. AWS ECR Phased Distribution Architecture
 
-Distribution is structured across two phases balancing immediate friction-free public adoption with enterprise-grade private infrastructure governance.
+Distribution is architected to support enterprise-grade private container governance in AWS Region **`us-west-2`** alongside backwards compatibility with public workflows.
 
 ```mermaid
 flowchart TB
-    subgraph Registry_Phase1 ["Phase 1: AWS Public ECR (Current)"]
+    subgraph Registry_Phase1 ["Phase 1: AWS Public ECR (Public Backwards Compatibility)"]
         PublicAuth["Auth Endpoint (us-east-1 Required)"]
         PublicURI[("public.ecr.aws/<alias>/ajp-security-analyzer")]
-        PublicConsumers["Public / OSS / External Repositories"]
+        PublicConsumers["Public / Open-Source Repositories"]
 
         PublicAuth --> PublicURI
         PublicURI -->|"Zero-Auth Anonymous Pull (docker pull)"| PublicConsumers
     end
 
-    subgraph Registry_Phase2 ["Phase 2: AWS Private ECR (Enterprise Migration)"]
-        PrivateAuth["AWS OIDC Federation (sts:AssumeRoleWithWebIdentity)"]
-        PrivateURI[("AWS Private ECR (us-west-2)<br/><account-id>.dkr.ecr.us-west-2.amazonaws.com/ajp-security-analyzer")]
-        PrivateConsumers["Internal Org Repositories / Regulated VPCs"]
+    subgraph Registry_Phase2 ["Phase 2: AWS Private ECR (Primary Enterprise Strategy)"]
+        PrivateAuth["AWS IAM / OIDC Auth (us-west-2)<br/>arn:aws:iam::615471835001:user/aiengineer"]
+        PrivateURI[("AWS Private ECR (us-west-2)<br/>615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer")]
+        PrivateConsumers["Enterprise Org Repositories / Secure CI Runners"]
 
         PrivateAuth --> PrivateURI
-        PrivateURI -->|"Authenticated IAM Role Pull"| PrivateConsumers
+        PrivateURI -->|"Authenticated IAM Pull via amazon-ecr-login@v2"| PrivateConsumers
     end
 ```
 
-### Regional Topology Rationale
+### AWS Private ECR Infrastructure Coordinates
 
-```
-+-----------------------------------------------------------------------------------+
-|                              REGIONAL TOPOLOGY                                    |
-+-----------------------------------------------------------------------------------+
-|  AWS Region: us-east-1 (N. Virginia)                                              |
-|  - AWS Public ECR API Control Plane & Authentication Token Endpoint               |
-|  - Required for: `aws-actions/amazon-ecr-login` with `registry-type: public`      |
-|  - Target Registry: `public.ecr.aws/<alias>/ajp-security-analyzer`                |
-+-----------------------------------------------------------------------------------+
-|  AWS Region: us-west-2 (Oregon)                                                   |
-|  - Primary Enterprise Workload, VPC Endpoints & Private ECR Storage               |
-|  - Required for: Enterprise IAM Role-to-Assume, KMS CMK Encryption, Inspector     |
-|  - Target Registry: `<account-id>.dkr.ecr.us-west-2.amazonaws.com/ajp-security-analyzer` |
-+-----------------------------------------------------------------------------------+
-```
-
-### 5.1 Phase 1: AWS Public ECR Distribution (Current)
-- **Registry URI**: `public.ecr.aws/<alias>/ajp-security-analyzer`
-- **Authentication**: **Zero-Auth Anonymous Pulls** for all consuming GitHub Actions workflows. No AWS credentials or secrets required in target repositories.
-- **Publisher Authentication**: The publishing CI pipeline authenticates against the AWS Public ECR API endpoint, which is strictly located in **`us-east-1`**.
-- **Marketplace Compatibility**: Consuming repositories invoke the action directly via standard GitHub Action syntax (`uses: ajponte/security-analyzer@v1`).
-
-### 5.2 Phase 2: AWS Private ECR Migration Architecture
-- **Registry URI**: `<account-id>.dkr.ecr.us-west-2.amazonaws.com/ajp-security-analyzer`
-- **Region**: Primary internal enterprise region **`us-west-2`**.
-- **Authentication Model**: Passwordless **AWS OIDC Federation** (`sts:AssumeRoleWithWebIdentity`) using GitHub Actions OIDC provider.
-- **Security & Compliance Features**:
-  - **AWS KMS CMK Encryption**: Encrypt image layers at rest using dedicated AWS KMS customer-managed keys.
-  - **Enhanced Vulnerability Scanning**: Continuous CVE detection powered by AWS Inspector and Clair scanning.
-  - **VPC Endpoint Isolation**: Support air-gapped pulls from self-hosted runners via AWS PrivateLink (`com.amazonaws.us-west-2.ecr.dkr`).
-
-### Strategic Migration Triggers & Comparison
-
-| Characteristic | Phase 1: AWS Public ECR | Phase 2: AWS Private ECR |
+| Parameter | Specification | Details |
 | :--- | :--- | :--- |
-| **Target Audience** | Open-source, public, and multi-organization repositories | Internal enterprise repositories, regulated VPCs |
-| **Authentication** | Anonymous (No credentials needed) | AWS IAM OIDC Role (`aws-actions/configure-aws-credentials`) |
-| **Registry Location** | Global Public Gallery (Auth in `us-east-1`) | Private Regional ECR in `us-west-2` |
-| **Vulnerability Scanning** | Basic ECR scan on push | AWS Inspector continuous runtime CVE scanning |
-| **Network Egress** | Public internet access required | Supports private VPC Endpoints (`PrivateLink`) |
-| **Data Transfer Quotas** | Free tier public quota | Governed by enterprise AWS data transfer policies |
+| **Repository Name** | `ajp/security-analyzer` | ECR namespace repository |
+| **Repository ARN** | `arn:aws:ecr:us-west-2:615471835001:repository/ajp/security-analyzer` | Target ARN for IAM policies |
+| **Repository URI** | `615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer` | Docker pull/push target endpoint |
+| **AWS Region** | `us-west-2` (Oregon) | Regional control plane and data storage |
+| **AWS Account ID** | `615471835001` | Dedicated AWS account |
+| **IAM User** | `arn:aws:iam::615471835001:user/aiengineer` | Dedicated IAM identity |
+| **Required Policy** | `AmazonEC2ContainerRegistryPowerUser` | Managed push/pull privileges |
+
+> [!NOTE]
+> For in-depth technical implementation and operational runbooks, see [agent-docs/PRIVATE-ECR-STRATEGY.md](file:///Users/aponte/personal_workspace/repos/security-analyzer/agent-docs/PRIVATE-ECR-STRATEGY.md).
 
 ---
 
 ## 6. CI/CD Publishing Pipeline
 
-The container publishing pipeline is automated via [.github/workflows/publish-ecr.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/publish-ecr.yml).
+The container publishing pipeline is automated via [.github/workflows/publish-ecr.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/publish-ecr.yml), building the container and publishing directly to the private registry in `us-west-2`.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Git as GitHub (Push to main / Tag v*.*.*)
-    participant GHA as GitHub Actions Runner
-    participant STS as AWS Security Token Service (STS us-east-1)
-    participant IAM as AWS IAM Role (GitHubActions-ECR-Publisher)
-    participant ECR as AWS Public ECR (public.ecr.aws)
+    participant GHA as GitHub Actions Runner (.github/workflows/publish-ecr.yml)
+    participant STS as AWS Security Token Service (STS us-west-2)
+    participant IAM as AWS IAM (Role or User: aiengineer)
+    participant ECR as AWS Private ECR (615471835001.dkr.ecr.us-west-2.amazonaws.com)
 
     Git->>GHA: Trigger Workflow (publish-ecr.yml)
     GHA->>GHA: Checkout Code & Setup Docker Buildx
     GHA->>GHA: Build Test Image & Run Smoke Tests
     
     rect rgb(240, 248, 255)
-        Note over GHA,STS: OIDC Passwordless Authentication
-        GHA->>STS: Request Token (AssumeRoleWithWebIdentity)
-        STS->>IAM: Validate JWT Claims (iss, aud, sub: repo:ajponte/security-analyzer:*)
-        IAM-->>STS: Generate Scoped Temporary Credentials (1 Hour)
+        Note over GHA,STS: OIDC Federation or IAM Access Keys
+        GHA->>STS: AssumeRoleWithWebIdentity OR Validate Access Keys
+        IAM-->>STS: Issue Temporary Credentials (AWS_REGION=us-west-2)
         STS-->>GHA: Return AWS_ACCESS_KEY_ID, SECRET, SESSION_TOKEN
     end
 
-    GHA->>ECR: Login (aws-actions/amazon-ecr-login --registry-type public)
-    GHA->>GHA: Calculate Multi-Tags (latest, sha-xxxxxxx, v1.2.3, v1.2, v1)
-    GHA->>ECR: Build & Push Multi-Arch Image Layers
+    GHA->>ECR: Login (aws-actions/amazon-ecr-login@v2)
+    GHA->>GHA: Calculate Tags (latest, sha-xxxxxxx, v1.2.3, v1.2, v1)
+    GHA->>ECR: Build & Push Image Layers with BuildKit GHA Cache
     ECR-->>GHA: Confirm Digest & Manifest Published
 ```
 
-### Complete Publishing Workflow ([.github/workflows/publish-ecr.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/publish-ecr.yml))
+### Publishing Pipeline Workflow ([.github/workflows/publish-ecr.yml](file:///Users/aponte/personal_workspace/repos/security-analyzer/.github/workflows/publish-ecr.yml))
 
 ```yaml
-name: Build & Publish Container to AWS ECR
+name: Build & Publish Container to AWS Private ECR
 
 on:
   push:
@@ -453,14 +423,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write # Required for requesting AWS OIDC Web Identity Token
+  id-token: write # Required for AWS OIDC authentication
   contents: read  # Required for actions/checkout
 
 env:
-  AWS_REGION: us-east-1 # AWS Public ECR API endpoint requires us-east-1
-  PUBLIC_ECR_REGISTRY: public.ecr.aws/a1b2c3d4
-  IMAGE_NAME: ajp-security-analyzer
-  ROLE_TO_ASSUME: arn:aws:iam::123456789012:role/GitHubActions-ECR-Publisher
+  AWS_REGION: us-west-2
+  ECR_REPOSITORY: 615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer
+  IMAGE_NAME: ajp/security-analyzer
 
 jobs:
   build-and-test:
@@ -481,13 +450,15 @@ jobs:
           push: false
           tags: ${{ env.IMAGE_NAME }}:test
           load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Smoke Test Image Execution
         run: |
           docker run --rm ${{ env.IMAGE_NAME }}:test --help || true
 
-  publish-public-ecr:
-    name: Publish to AWS Public ECR
+  publish-private-ecr:
+    name: Publish to AWS Private ECR
     needs: build-and-test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -498,23 +469,23 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Configure AWS Credentials via OIDC
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
-      - name: Login to AWS Public ECR
+      - name: Login to AWS Private ECR
         uses: aws-actions/amazon-ecr-login@v2
-        with:
-          registry-type: public
 
       - name: Extract Docker Metadata (Tags & Labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.PUBLIC_ECR_REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.ECR_REPOSITORY }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=short
@@ -522,7 +493,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
 
-      - name: Build & Push Image to Public ECR
+      - name: Build & Push Image to Private ECR
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -534,33 +505,26 @@ jobs:
           cache-to: type=gha,mode=max
 ```
 
-### Multi-Tagging Strategy
-
-```
-Repository Release Event: git tag v1.4.2 && git push origin v1.4.2
-  ├── public.ecr.aws/<alias>/ajp-security-analyzer:v1.4.2    (Exact Immutable Release)
-  ├── public.ecr.aws/<alias>/ajp-security-analyzer:v1.4      (Minor Floating Release)
-  ├── public.ecr.aws/<alias>/ajp-security-analyzer:v1        (Major Floating Release)
-  ├── public.ecr.aws/<alias>/ajp-security-analyzer:sha-a1b2c3d (Immutable Commit SHA)
-  └── public.ecr.aws/<alias>/ajp-security-analyzer:latest    (Latest Mainline Branch Build)
-```
-
 ---
 
 ## 7. Consumer Workflow Patterns & Integration Blueprints
 
-### 7.1 Pattern A: Zero-Auth Fast SAST PR Gate (Phase 1 Public ECR)
+### 7.1 Pattern A: Fast SAST PR Gate via Private ECR
 
-Consuming repositories invoke the action directly without needing AWS credentials:
+Consuming repositories authenticate against `us-west-2`, log into ECR, and execute the private container:
 
 ```yaml
-name: Security Scan
+name: Security SAST Gate (Private ECR)
 
 on:
   pull_request:
     branches: [ main ]
   push:
     branches: [ main ]
+
+permissions:
+  id-token: write # Required if authenticating via OIDC
+  contents: read
 
 jobs:
   sast:
@@ -570,34 +534,59 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Run Security Analyzer
-        id: security_scan
-        uses: ajponte/security-analyzer@v1
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          mode: 'scan'
-          scan_path: '.'
-          rules: 'auto'
-          fail_on: 'ERROR'
-          timeout: '5m'
+          role-to-assume: arn:aws:iam::615471835001:role/GitHubConsumer-SecurityAnalyzer-Pull
+          aws-region: us-west-2
+          audience: sts.amazonaws.com
+
+      - name: Log in to AWS Private ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Run Security Analyzer Container
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/github/workspace" \
+            -e GITHUB_STEP_SUMMARY="/github/workspace/step-summary.md" \
+            -e INPUT_MODE="scan" \
+            -e INPUT_SCAN_PATH="." \
+            -e INPUT_RULES="auto" \
+            -e INPUT_FAIL_ON="ERROR" \
+            -e INPUT_TIMEOUT="5m" \
+            615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer:latest
+
+      - name: Append Job Summary
+        if: always()
+        run: |
+          if [[ -f "${{ github.workspace }}/step-summary.md" ]]; then
+            cat "${{ github.workspace }}/step-summary.md" >> $GITHUB_STEP_SUMMARY
+            rm -f "${{ github.workspace }}/step-summary.md"
+          fi
 
       - name: Archive SAST Report Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sast-report
-          path: ${{ steps.security_scan.outputs.report_path }}
+          path: report.md
           retention-days: 14
 ```
 
 ### 7.2 Pattern B: Deep AI Security Audit with Dynamic Artifact Persistence
 
 ```yaml
-name: AI Security Audit
+name: AI Security Audit (Private ECR)
 
 on:
   schedule:
     - cron: '0 4 * * 1' # Weekly on Monday at 04:00 UTC
   workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   audit:
@@ -607,101 +596,51 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Run Deep AI Security Analysis
-        id: ai_audit
-        uses: ajponte/security-analyzer@v1
-        with:
-          mode: 'analyze'
-          scan_path: '.'
-          provider: 'anthropic'
-          model: 'claude-3-5-sonnet-latest'
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          fail_on: 'ERROR'
-
-      - name: Archive Unique AI Audit Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-audit-${{ steps.ai_audit.outputs.scan_id }}
-          path: ${{ steps.ai_audit.outputs.report_path }}
-          retention-days: 30
-
-      - name: Post Audit Findings to PR
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const reportPath = '${{ steps.ai_audit.outputs.report_path }}';
-            if (fs.existsSync(reportPath)) {
-              const content = fs.readFileSync(reportPath, 'utf8');
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: `## 🛡️ AI Security Audit Report (${{ steps.ai_audit.outputs.scan_id }})\n\n${content}`
-              });
-            }
-```
-
-### 7.3 Pattern C: Enterprise Private ECR Consumer Workflow (Phase 2)
-
-For enterprise repositories pulling from a private registry in `us-west-2`:
-
-```yaml
-name: Enterprise Private SAST
-
-on:
-  pull_request:
-    branches: [ main ]
-
-permissions:
-  id-token: write # Required for AWS OIDC
-  contents: read
-
-jobs:
-  scan:
-    name: Private Container Scan
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Authenticate to AWS via OIDC
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::123456789012:role/GithubConsumer-ECR-Pull
+          role-to-assume: arn:aws:iam::615471835001:role/GitHubConsumer-SecurityAnalyzer-Pull
           aws-region: us-west-2
           audience: sts.amazonaws.com
 
-      - name: Log in to Private ECR
-        id: login-ecr
+      - name: Log in to AWS Private ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Execute Security Analyzer Container
+      - name: Run Deep AI Security Analysis
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: latest
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/github/workspace" \
-            -e GITHUB_STEP_SUMMARY="/github/workspace/summary.md" \
-            -e INPUT_MODE="scan" \
+            -e GITHUB_STEP_SUMMARY="/github/workspace/step-summary.md" \
+            -e INPUT_MODE="analyze" \
             -e INPUT_SCAN_PATH="." \
+            -e INPUT_PROVIDER="anthropic" \
+            -e INPUT_MODEL="claude-3-5-sonnet-latest" \
+            -e INPUT_ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
             -e INPUT_FAIL_ON="ERROR" \
-            "${ECR_REGISTRY}/ajp-security-analyzer:${IMAGE_TAG}"
+            615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer:latest
 
-      - name: Append Summary to GitHub Summary
+      - name: Append Job Summary
         if: always()
         run: |
-          if [[ -f "${{ github.workspace }}/summary.md" ]]; then
-            cat "${{ github.workspace }}/summary.md" >> $GITHUB_STEP_SUMMARY
+          if [[ -f "${{ github.workspace }}/step-summary.md" ]]; then
+            cat "${{ github.workspace }}/step-summary.md" >> $GITHUB_STEP_SUMMARY
+            rm -f "${{ github.workspace }}/step-summary.md"
           fi
+
+      - name: Archive AI Security Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-security-reports
+          path: llm-reports/
+          retention-days: 30
 ```
 
 ---
 
-## 8. IAM Trust Boundaries, Security Containment & Threat Modeling
+## 8. IAM Trust Boundaries, Security Containment & Policy Definitions
 
 ```mermaid
 flowchart LR
@@ -709,28 +648,25 @@ flowchart LR
         WorkflowJWT["GitHub OIDC JWT Token<br/>(sub: repo:ajponte/security-analyzer:*)"]
     end
 
-    subgraph AWS_IAM_Boundary ["AWS IAM Security Boundary"]
+    subgraph AWS_IAM_Boundary ["AWS IAM Security Boundary (Account 615471835001)"]
         OIDCProvider["OIDC Provider: token.actions.githubusercontent.com"]
-        PublisherRole["IAM Role: GitHubActions-ECR-Publisher"]
-        ConsumerRole["IAM Role: GithubConsumer-ECR-Pull"]
+        PublisherRole["Publisher: User aiengineer / Role"]
+        ConsumerRole["Consumer Role: GitHubConsumer-SecurityAnalyzer-Pull"]
     end
 
-    subgraph ECR_Storage ["AWS Container Registries"]
-        PublicRepo[("AWS Public ECR (us-east-1)<br/>public.ecr.aws/<alias>/ajp-security-analyzer")]
-        PrivateRepo[("AWS Private ECR (us-west-2)<br/>123456789012.dkr.ecr.us-west-2.amazonaws.com/ajp-security-analyzer")]
+    subgraph ECR_Storage ["AWS Private Registry (us-west-2)"]
+        PrivateRepo[("AWS Private ECR<br/>615471835001.dkr.ecr.us-west-2.amazonaws.com/ajp/security-analyzer")]
     end
 
     WorkflowJWT -->|sts:AssumeRoleWithWebIdentity| OIDCProvider
     OIDCProvider -->|Evaluates Subject & Audience| PublisherRole
     OIDCProvider -->|Evaluates Enterprise Org Sub| ConsumerRole
 
-    PublisherRole -->|ecr-public:UploadLayerPart, PutImage| PublicRepo
+    PublisherRole -->|ecr:PutImage, UploadLayerPart| PrivateRepo
     ConsumerRole -->|ecr:BatchGetImage, GetDownloadUrlForLayer| PrivateRepo
 ```
 
-### 8.1 AWS IAM OIDC Trust Policy (Publisher)
-
-To eliminate hardcoded long-lived `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets, the publishing role utilizes Web Identity Federation:
+### 8.1 Publisher IAM OIDC Trust Policy JSON
 
 ```json
 {
@@ -740,7 +676,7 @@ To eliminate hardcoded long-lived `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY
       "Sid": "GitHubOIDCAuthentication",
       "Effect": "Allow",
       "Principal": {
-        "Federated": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+        "Federated": "arn:aws:iam::615471835001:oidc-provider/token.actions.githubusercontent.com"
       },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
@@ -756,45 +692,14 @@ To eliminate hardcoded long-lived `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY
 }
 ```
 
-### 8.2 IAM Least-Privilege Publishing Policy (Public ECR)
+### 8.2 Publisher Scoped Least-Privilege Policy JSON
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "PublicECRAuth",
-      "Effect": "Allow",
-      "Action": [
-        "ecr-public:GetAuthorizationToken",
-        "sts:GetServiceBearerToken"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "PublicECRPush",
-      "Effect": "Allow",
-      "Action": [
-        "ecr-public:BatchCheckLayerAvailability",
-        "ecr-public:CompleteLayerUpload",
-        "ecr-public:InitiateLayerUpload",
-        "ecr-public:PutImage",
-        "ecr-public:UploadLayerPart"
-      ],
-      "Resource": "arn:aws:ecr-public::123456789012:repository/ajp-security-analyzer"
-    }
-  ]
-}
-```
-
-### 8.3 IAM Least-Privilege Consumer Policy (Private ECR `us-west-2`)
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "PrivateECRAuth",
+      "Sid": "ECRAuthTokenGlobal",
       "Effect": "Allow",
       "Action": [
         "ecr:GetAuthorizationToken"
@@ -802,25 +707,54 @@ To eliminate hardcoded long-lived `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY
       "Resource": "*"
     },
     {
-      "Sid": "PrivateECRPull",
+      "Sid": "ECRPrivatePushScoped",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:GetRepositoryPolicy",
+        "ecr:DescribeRepositories",
+        "ecr:ListImages",
+        "ecr:DescribeImages",
+        "ecr:BatchGetImage",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:PutImage"
+      ],
+      "Resource": "arn:aws:ecr:us-west-2:615471835001:repository/ajp/security-analyzer"
+    }
+  ]
+}
+```
+
+### 8.3 Consumer Scoped Pull Policy JSON (`us-west-2`)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ECRAuthTokenGlobal",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ECRPrivatePullScoped",
       "Effect": "Allow",
       "Action": [
         "ecr:BatchCheckLayerAvailability",
         "ecr:GetDownloadUrlForLayer",
         "ecr:BatchGetImage"
       ],
-      "Resource": "arn:aws:ecr:us-west-2:123456789012:repository/ajp-security-analyzer"
+      "Resource": "arn:aws:ecr:us-west-2:615471835001:repository/ajp/security-analyzer"
     }
   ]
 }
 ```
-
-### 8.4 Container & Runtime Security Boundaries
-
-1. **Non-Privileged Execution**: The container requires no privileged flags (`--privileged`) or Linux capabilities (`CAP_SYS_ADMIN`).
-2. **Directory Traversal Protection**: When running in `analyze` mode, tool calls requesting file scanning must pass `isSafePath` containment checks ([pkg/mcp/tools.go](file:///Users/aponte/personal_workspace/repos/security-analyzer/pkg/mcp/tools.go#L21)), preventing the LLM or malicious prompts from accessing host files outside `/github/workspace`.
-3. **Secret Masking & Zero-Logging**: Sensitive API keys (`OPENAI_API_KEY`, etc.) passed through Action inputs are strictly routed as process environment variables and never logged to stdout or embedded in artifact reports.
-4. **Read-Only Rootfs Compatibility**: All generated reports (`report.md`, `llm-reports/*.md`) are written exclusively to the mounted workspace directory (`/github/workspace`), allowing container engines to run with read-only root filesystems (`--read-only`) if configured.
 
 ---
 
@@ -846,6 +780,5 @@ docker run --rm -v "$(pwd):/github/workspace" \
 | :--- | :--- | :--- |
 | `fatal: detected dubious ownership in repository` | Container UID mismatch with host runner mount | Ensure `git config --global --add safe.directory '*'` is present in Dockerfile and executed before git commands. |
 | `OIDC error: Could not assume role with web identity` | Missing `permissions: id-token: write` or mismatched `sub` claim in IAM Trust Policy | Verify workflow YAML defines `id-token: write` and ensure IAM trust condition matches `repo:<owner>/<repo>:*`. |
-| `Public ECR login error: unauthorized` | AWS Public ECR requested in region other than `us-east-1` | AWS Public ECR auth control plane is strictly located in `us-east-1`. Set `aws-region: us-east-1` in the credentials action. |
-| `Private ECR pull denied in us-west-2` | IAM role missing repository pull permissions | Ensure consumer role has `ecr:BatchGetImage` on `arn:aws:ecr:us-west-2:<account>:repository/ajp-security-analyzer`. |
-| `Semgrep scan timeout exceeded` | Massive mono-repo or unindexed vendor directories | Supply `.semgrepignore` or increase timeout input via `with: timeout: '15m'`. |
+| `Private ECR pull denied in us-west-2` | IAM role missing repository pull permissions | Ensure consumer role has `ecr:BatchGetImage` on `arn:aws:ecr:us-west-2:615471835001:repository/ajp/security-analyzer`. |
+| `Semgrep scan timeout exceeded` | Massive mono-repo or unindexed vendor directories | Supply `.semgrepignore` or increase timeout input via `INPUT_TIMEOUT="15m"`. |

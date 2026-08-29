@@ -1,4 +1,4 @@
-name: Build & Publish Container to AWS ECR
+name: Build & Publish Container to AWS Private ECR
 
 on:
   push:
@@ -16,10 +16,9 @@ permissions:
   contents: read  # Required for actions/checkout
 
 env:
-  AWS_REGION: us-east-1 # AWS Public ECR API endpoint requires us-east-1
-  PUBLIC_ECR_REGISTRY: public.ecr.aws/a1b2c3d4
-  IMAGE_NAME: ajp-security-analyzer
-  ROLE_TO_ASSUME: arn:aws:iam::123456789012:role/GitHubActions-ECR-Publisher
+  AWS_REGION: us-west-2
+  ECR_REGISTRY: ${{ secrets.ECR_REGISTRY || vars.ECR_REGISTRY || '615471835001.dkr.ecr.us-west-2.amazonaws.com' }}
+  IMAGE_NAME: ajp/security-analyzer
 
 jobs:
   build-and-test:
@@ -45,8 +44,8 @@ jobs:
         run: |
           docker run --rm ${{ env.IMAGE_NAME }}:test --help || true
 
-  publish-public-ecr:
-    name: Publish to AWS Public ECR
+  publish-ecr:
+    name: Publish to Amazon Private ECR
     needs: build-and-test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -57,23 +56,23 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Configure AWS Credentials via OIDC
+      - name: Configure AWS Credentials (OIDC or Access Keys)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
-      - name: Login to AWS Public ECR
+      - name: Login to Amazon Private ECR
         uses: aws-actions/amazon-ecr-login@v2
-        with:
-          registry-type: public
 
       - name: Extract Docker Metadata (Tags & Labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.PUBLIC_ECR_REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.ECR_REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=short
@@ -81,7 +80,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
 
-      - name: Build & Push Image to Public ECR
+      - name: Build & Push Image to Private ECR
         uses: docker/build-push-action@v5
         with:
           context: .

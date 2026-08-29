@@ -1,4 +1,4 @@
-name: 'Security Analyzer'
+name: 'AJP Tech Security Analyzer'
 description: 'AI-driven SAST scanner combining Semgrep analysis and LLM security audits'
 author: 'ajponte'
 branding:
