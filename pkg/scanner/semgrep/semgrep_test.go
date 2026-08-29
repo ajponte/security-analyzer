@@ -86,3 +86,30 @@ func TestParseScanReport(t *testing.T) {
 		t.Errorf("expected 2 scanned paths, got %d", len(report.Paths.Scanned))
 	}
 }
+
+func TestParseScanReport_WithSurroundingOutput(t *testing.T) {
+	terminalOutput := `
+┌─────────────┐
+│ Scan Status │
+└─────────────┘
+  Scanning 1 file tracked by git:
+{"version":"1.175.0","results":[{"check_id":"test-vuln","path":"app.py","start":{"line":1,"col":1,"offset":0},"end":{"line":1,"col":10,"offset":9},"extra":{"message":"test finding","severity":"WARNING","lines":"eval(x)"}}],"errors":[],"paths":{"scanned":["app.py"]}}
+Ran 1 rules on 1 file: 1 findings.
+`
+	report, err := parseScanReport([]byte(terminalOutput))
+	if err != nil {
+		t.Fatalf("unexpected error parsing terminal output: %v", err)
+	}
+
+	if report.Version != "1.175.0" {
+		t.Errorf("expected version 1.175.0, got %s", report.Version)
+	}
+
+	if len(report.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(report.Results))
+	}
+
+	if report.Results[0].CheckID != "test-vuln" {
+		t.Errorf("expected test-vuln, got %s", report.Results[0].CheckID)
+	}
+}

@@ -17,8 +17,8 @@ type Server struct {
 	workspace string
 }
 
-// NewServer configures logging and instantiates the MCP server.
-func NewServer(cfg *config.SemgrepConfig) *Server {
+// NewServer configures logging and instantiates the MCP server with an optional allowed workspace.
+func NewServer(cfg *config.SemgrepConfig, workspace ...string) *Server {
 	// Configure application logger to output to os.Stderr in MCP mode.
 	// Since os.Stdout is used for MCP stdio transport, we must use os.Stderr for logs.
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -34,17 +34,12 @@ func NewServer(cfg *config.SemgrepConfig) *Server {
 		nil,
 	)
 
-	// Resolve the allowed workspace directory.
-	cwd, err := os.Getwd()
-	if err != nil {
-		slog.Error("failed to get current working directory for allowed workspace", "error", err)
-		cwd = "."
-	}
+	allowedWS := getWorkspace(workspace...)
 
 	return &Server{
 		mcpServer: mcpServer,
 		cfg:       cfg,
-		workspace: cwd,
+		workspace: allowedWS,
 	}
 }
 
@@ -57,4 +52,21 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Run the server using StdioTransport.
 	return s.mcpServer.Run(ctx, &mcp.StdioTransport{})
+}
+
+// Resolve the allowed workspace directory.
+func getWorkspace(workspace ...string) string {
+	allowedWS := ""
+	if len(workspace) > 0 && workspace[0] != "" {
+		allowedWS = workspace[0]
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			slog.Error("failed to get current working directory for allowed workspace", "error", err)
+			cwd = "."
+		}
+		allowedWS = cwd
+	}
+
+	return allowedWS
 }

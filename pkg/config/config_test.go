@@ -118,3 +118,38 @@ func TestLoadConfig_CaseInsensitiveProvider(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadConfig_TimeoutFormats(t *testing.T) {
+	t.Run("Duration string with unit (e.g. 5m)", func(t *testing.T) {
+		t.Setenv("SEMGREP_TIMEOUT", "5m")
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.Semgrep.Timeout != 5*time.Minute {
+			t.Errorf("expected 5m, got %v", cfg.Semgrep.Timeout)
+		}
+	})
+
+	t.Run("Integer seconds (e.g. 300)", func(t *testing.T) {
+		t.Setenv("SEMGREP_TIMEOUT", "300")
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.Semgrep.Timeout != 300*time.Second {
+			t.Errorf("expected 300s (5m), got %v", cfg.Semgrep.Timeout)
+		}
+	})
+
+	t.Run("Integer seconds with whitespace (e.g. ' 60 ')", func(t *testing.T) {
+		t.Setenv("SEMGREP_TIMEOUT", " 60 ")
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.Semgrep.Timeout != 60*time.Second {
+			t.Errorf("expected 60s, got %v", cfg.Semgrep.Timeout)
+		}
+	})
+}

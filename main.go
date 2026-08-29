@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"security-analyzer/pkg/analyzer"
@@ -41,6 +42,9 @@ func parseCLIArgs(args []string) cliOptions {
 	switch args[1] {
 	case "mcp":
 		opts.mode = modeMCP
+		if len(args) > 2 {
+			opts.scanPath = args[2]
+		}
 	case "analyze":
 		opts.mode = modeAnalyze
 		if len(args) > 2 {
@@ -72,7 +76,7 @@ func main() {
 	var runErr error
 	switch opts.mode {
 	case modeMCP:
-		runErr = runMCP(ctx, &cfg.Semgrep)
+		runErr = runMCP(ctx, &cfg.Semgrep, opts.scanPath)
 	case modeAnalyze:
 		runErr = runAnalyze(ctx, cfg, opts.scanPath)
 	case modeScan:
@@ -85,8 +89,8 @@ func main() {
 	}
 }
 
-func runMCP(ctx context.Context, cfg *config.SemgrepConfig) error {
-	server := mcp.NewServer(cfg)
+func runMCP(ctx context.Context, cfg *config.SemgrepConfig, workspace string) error {
+	server := mcp.NewServer(cfg, workspace)
 	if err := server.Start(ctx); err != nil {
 		return fmt.Errorf("MCP server terminated: %w", err)
 	}
@@ -95,8 +99,14 @@ func runMCP(ctx context.Context, cfg *config.SemgrepConfig) error {
 
 func runAnalyze(ctx context.Context, cfg *config.Config, scanPath string) error {
 	setupLogger()
+
+	absPath, err := filepath.Abs(scanPath)
+	if err != nil {
+		absPath = scanPath
+	}
+
 	slog.Info("Starting LLM-driven security analysis",
-		"path", scanPath,
+		"path", absPath,
 		"provider", cfg.LLM.Provider,
 		"model", cfg.LLM.Model)
 
@@ -110,7 +120,7 @@ func runAnalyze(ctx context.Context, cfg *config.Config, scanPath string) error 
 		return fmt.Errorf("locating executable path: %w", err)
 	}
 
-	mcpClient, err := mcp.NewMCPClient(selfPath)
+	mcpClient, err := mcp.NewMCPClient(selfPath, absPath)
 	if err != nil {
 		return fmt.Errorf("initializing MCP client: %w", err)
 	}
@@ -119,7 +129,7 @@ func runAnalyze(ctx context.Context, cfg *config.Config, scanPath string) error 
 	}()
 
 	az := analyzer.NewAnalyzer(llmClient, mcpClient)
-	reportContent, err := az.Analyze(ctx, scanPath)
+	reportContent, err := az.Analyze(ctx, absPath)
 	if err != nil {
 		return fmt.Errorf("running security analysis: %w", err)
 	}

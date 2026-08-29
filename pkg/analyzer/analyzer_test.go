@@ -3,6 +3,7 @@ package analyzer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -178,6 +179,41 @@ func TestAnalyzer_Analyze_LLMError(t *testing.T) {
 	}
 }
 
+func TestAnalyzer_Analyze_ToolExecutionError(t *testing.T) {
+	tempDir := t.TempDir()
+	outDir := filepath.Join(tempDir, "llm-reports")
+
+	mockTools := &mockToolClient{
+		tools:   []llm.Tool{{Name: "semgrep_scan"}},
+		callErr: errors.New("semgrep binary crashed with exit status 2"),
+	}
+	mockLLM := &mockLLMClient{
+		responses: []*llm.Response{
+			{
+				Content: "Attempting scan",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_fail", Name: "semgrep_scan", Arguments: `{"path":"."}`},
+				},
+			},
+		},
+	}
+
+	az := NewAnalyzer(mockLLM, mockTools, Options{
+		OutputDir: outDir,
+	})
+
+	_, err := az.Analyze(context.Background(), ".")
+	if err == nil {
+		t.Fatal("expected error on tool execution failure, got nil")
+	}
+
+	// Verify that NO report file was written to the output directory
+	entries, _ := os.ReadDir(outDir)
+	if len(entries) > 0 {
+		t.Fatalf("expected no report files written on error, found %d files", len(entries))
+	}
+}
+
 func TestAnalyzer_Analyze_MaxTurnsExceeded(t *testing.T) {
 	mockTools := &mockToolClient{
 		tools: []llm.Tool{{Name: "semgrep_scan"}},
@@ -244,5 +280,86 @@ func TestAnalyzer_Analyze_MultipleToolCallsInOneTurn(t *testing.T) {
 
 	if len(mockTools.calledTools) != 2 {
 		t.Fatalf("expected 2 tool executions, got %d (%v)", len(mockTools.calledTools), mockTools.calledTools)
+	}
+}
+
+func TestAnalyzer_Analyze_OutputDirCreation(t *testing.T) {
+	tempDir := t.TempDir()
+	outDir := filepath.Join(tempDir, "custom-llm-reports")
+	outFile := "security-findings.md"
+
+	mockTools := &mockToolClient{
+		tools: []llm.Tool{{Name: "semgrep_scan"}},
+	}
+	mockLLM := &mockLLMClient{
+		responses: []*llm.Response{
+			{Content: "Report inside directory"},
+		},
+	}
+
+	az := NewAnalyzer(mockLLM, mockTools, Options{
+		OutputDir:  outDir,
+		OutputFile: outFile,
+	})
+
+	report, err := az.Analyze(context.Background(), ".")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedFile := filepath.Join(outDir, outFile)
+	data, err := os.ReadFile(expectedFile)
+	if err != nil {
+		t.Fatalf("expected file to be written at %s: %v", expectedFile, err)
+	}
+
+	if string(data) != report {
+		t.Errorf("file content %q does not match report %q", string(data), report)
+	}
+}
+
+func TestAnalyzer_Analyze_NamedAfterScanID(t *testing.T) {
+	tempDir := t.TempDir()
+	outDir := filepath.Join(tempDir, "llm-reports")
+
+	scanID := "scan-20260828-185800-abcdef12"
+	mockTools := &mockToolClient{
+		tools: []llm.Tool{{Name: "semgrep_scan"}},
+		callResults: map[string]string{
+			"semgrep_scan": fmt.Sprintf(`{"scan_id":"%s","results":[]}`, scanID),
+		},
+	}
+	mockLLM := &mockLLMClient{
+		responses: []*llm.Response{
+			{
+				Content: "Scanning codebase",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "semgrep_scan", Arguments: `{"path":"."}`},
+				},
+			},
+			{
+				Content: "# Final Report\nAll clear.",
+			},
+		},
+	}
+
+	az := NewAnalyzer(mockLLM, mockTools, Options{
+		OutputDir:  outDir,
+		OutputFile: "llm-report.md", // default
+	})
+
+	report, err := az.Analyze(context.Background(), ".")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedFile := filepath.Join(outDir, fmt.Sprintf("%s.md", scanID))
+	data, err := os.ReadFile(expectedFile)
+	if err != nil {
+		t.Fatalf("expected file to be written named after scan_id (%s): %v", expectedFile, err)
+	}
+
+	if string(data) != report {
+		t.Errorf("file content %q does not match report %q", string(data), report)
 	}
 }

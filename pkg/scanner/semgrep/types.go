@@ -42,6 +42,7 @@ type Paths struct {
 
 // ScanReport represents the full schema returned by "semgrep scan --json".
 type ScanReport struct {
+	ScanID  string   `json:"scan_id,omitempty"`
 	Version string   `json:"version"`
 	Results []Result `json:"results"`
 	Errors  []Error  `json:"errors"`

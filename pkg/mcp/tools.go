@@ -16,7 +16,7 @@ import (
 // ScanArguments holds the input parameters for the semgrep_scan tool.
 type ScanArguments struct {
 	Path  string `json:"path" jsonschema:"Absolute or relative path to the directory or repository that needs to be scanned"`
-	Rules string `json:"rules,omitempty" jsonschema:"A comma-separated list of rule names or paths (e.g. p/default,p/golang). If omitted, uses default config"`
+	Rules string `json:"rules,omitempty" jsonschema:"A Semgrep rule configuration (e.g. 'auto', 'p/golang', 'p/python', 'p/security-audit'). Leave omitted to use the default configured rules"`
 }
 
 // isSafePath checks if targetPath is within the allowedWorkspace directory.
@@ -65,7 +65,7 @@ func registerSemgrepScanTool(server *mcp.Server, cfg *config.SemgrepConfig, allo
 
 		// Configure scanner options dynamically.
 		scanCfg := *cfg
-		if args.Rules != "" {
+		if args.Rules != "" && args.Rules != "default" {
 			scanCfg.Rules = args.Rules
 		}
 

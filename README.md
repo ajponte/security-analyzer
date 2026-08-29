@@ -24,7 +24,7 @@ Once the application is built (e.g., via `make build`), it can be executed in th
    ```bash
    ./out/security-analyzer analyze <path>
    ```
-   Triggers an LLM-driven security audit. It spawns the MCP server subprocess internally, runs Semgrep scan tools, analyzes the findings using the configured LLM provider, and prints/saves an AI-synthesized audit report to `llm-report.md`.
+   Triggers an LLM-driven security audit. It spawns the MCP server subprocess internally, runs Semgrep scan tools, analyzes the findings using the configured LLM provider, and saves an AI-synthesized audit report to `llm-reports/<scan_id>.md` (while streaming progress to stdout).
 
 ---
 
