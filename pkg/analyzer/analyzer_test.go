@@ -179,6 +179,41 @@ func TestAnalyzer_Analyze_LLMError(t *testing.T) {
 	}
 }
 
+func TestAnalyzer_Analyze_ToolExecutionError(t *testing.T) {
+	tempDir := t.TempDir()
+	outDir := filepath.Join(tempDir, "llm-reports")
+
+	mockTools := &mockToolClient{
+		tools:   []llm.Tool{{Name: "semgrep_scan"}},
+		callErr: errors.New("semgrep binary crashed with exit status 2"),
+	}
+	mockLLM := &mockLLMClient{
+		responses: []*llm.Response{
+			{
+				Content: "Attempting scan",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_fail", Name: "semgrep_scan", Arguments: `{"path":"."}`},
+				},
+			},
+		},
+	}
+
+	az := NewAnalyzer(mockLLM, mockTools, Options{
+		OutputDir: outDir,
+	})
+
+	_, err := az.Analyze(context.Background(), ".")
+	if err == nil {
+		t.Fatal("expected error on tool execution failure, got nil")
+	}
+
+	// Verify that NO report file was written to the output directory
+	entries, _ := os.ReadDir(outDir)
+	if len(entries) > 0 {
+		t.Fatalf("expected no report files written on error, found %d files", len(entries))
+	}
+}
+
 func TestAnalyzer_Analyze_MaxTurnsExceeded(t *testing.T) {
 	mockTools := &mockToolClient{
 		tools: []llm.Tool{{Name: "semgrep_scan"}},

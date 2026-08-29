@@ -34,18 +34,7 @@ func NewServer(cfg *config.SemgrepConfig, workspace ...string) *Server {
 		nil,
 	)
 
-	// Resolve the allowed workspace directory.
-	allowedWS := ""
-	if len(workspace) > 0 && workspace[0] != "" {
-		allowedWS = workspace[0]
-	} else {
-		cwd, err := os.Getwd()
-		if err != nil {
-			slog.Error("failed to get current working directory for allowed workspace", "error", err)
-			cwd = "."
-		}
-		allowedWS = cwd
-	}
+	allowedWS := getWorkspace(workspace...)
 
 	return &Server{
 		mcpServer: mcpServer,
@@ -63,4 +52,21 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Run the server using StdioTransport.
 	return s.mcpServer.Run(ctx, &mcp.StdioTransport{})
+}
+
+// Resolve the allowed workspace directory.
+func getWorkspace(workspace ...string) string {
+	allowedWS := ""
+	if len(workspace) > 0 && workspace[0] != "" {
+		allowedWS = workspace[0]
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			slog.Error("failed to get current working directory for allowed workspace", "error", err)
+			cwd = "."
+		}
+		allowedWS = cwd
+	}
+
+	return allowedWS
 }

@@ -90,8 +90,11 @@ func (a *Analyzer) Analyze(ctx context.Context, scanPath string) (string, error)
 			return resp.Content, nil
 		}
 
-		// Execute tool calls and append findings.
-		toolMessages := a.executeToolCalls(ctx, resp.ToolCalls)
+		// Execute tool calls and fail early on execution errors.
+		toolMessages, err := a.executeToolCalls(ctx, resp.ToolCalls)
+		if err != nil {
+			return "", fmt.Errorf("tool execution failed: %w", err)
+		}
 		messages = append(messages, toolMessages...)
 	}
 
@@ -111,33 +114,27 @@ func (a *Analyzer) initialMessages(scanPath string) []llm.Message {
 	}
 }
 
-func (a *Analyzer) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) []llm.Message {
+func (a *Analyzer) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) ([]llm.Message, error) {
 	results := make([]llm.Message, 0, len(toolCalls))
 	for _, tc := range toolCalls {
 		slog.Info("LLM requested tool call", "tool", tc.Name, "id", tc.ID)
 
 		args, err := parseToolArguments(tc.Arguments)
 		if err != nil {
-			results = append(results, llm.Message{
-				Role:       llm.RoleTool,
-				Content:    fmt.Sprintf("Error parsing tool arguments: %v", err),
-				Name:       tc.Name,
-				ToolCallID: tc.ID,
-			})
-			continue
+			return nil, fmt.Errorf("parsing tool arguments for %s: %w", tc.Name, err)
 		}
 
 		toolResult, err := a.toolClient.CallTool(ctx, tc.Name, args)
 		if err != nil {
-			toolResult = fmt.Sprintf("Tool execution failed: %v", err)
-		} else {
-			// Extract scan_id if returned in the tool result
-			var probe struct {
-				ScanID string `json:"scan_id"`
-			}
-			if probeErr := json.Unmarshal([]byte(toolResult), &probe); probeErr == nil && probe.ScanID != "" {
-				a.capturedScanID = probe.ScanID
-			}
+			return nil, fmt.Errorf("calling tool %s: %w", tc.Name, err)
+		}
+
+		// Extract scan_id if returned in the tool result
+		var probe struct {
+			ScanID string `json:"scan_id"`
+		}
+		if probeErr := json.Unmarshal([]byte(toolResult), &probe); probeErr == nil && probe.ScanID != "" {
+			a.capturedScanID = probe.ScanID
 		}
 
 		results = append(results, llm.Message{
@@ -147,7 +144,7 @@ func (a *Analyzer) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCal
 			ToolCallID: tc.ID,
 		})
 	}
-	return results
+	return results, nil
 }
 
 func parseToolArguments(argsJSON string) (map[string]interface{}, error) {
