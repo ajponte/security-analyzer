@@ -16,9 +16,9 @@ permissions:
   contents: read  # Required for actions/checkout
 
 env:
-  AWS_REGION: us-east-1 # AWS Public ECR requires us-east-1 endpoint
+  AWS_REGION: us-east-1 # AWS Public ECR API endpoint requires us-east-1
   PUBLIC_ECR_REGISTRY: public.ecr.aws/a1b2c3d4
-  IMAGE_NAME: security-analyzer
+  IMAGE_NAME: ajp-security-analyzer
   ROLE_TO_ASSUME: arn:aws:iam::123456789012:role/GitHubActions-ECR-Publisher
 
 jobs:

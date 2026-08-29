@@ -146,10 +146,10 @@ You can also build and run the Docker container locally:
 
 ```bash
 # Build the container image
-docker build -t security-analyzer:latest .
+docker build -t ajp-security-analyzer:latest .
 
 # Run a SAST scan
-docker run --rm -v "$(pwd):/github/workspace" security-analyzer:latest scan .
+docker run --rm -v "$(pwd):/github/workspace" ajp-security-analyzer:latest scan .
 
 # Run an AI security audit
 docker run --rm \
@@ -157,7 +157,7 @@ docker run --rm \
   -e INPUT_MODE="analyze" \
   -e INPUT_PROVIDER="openai" \
   -e INPUT_OPENAI_API_KEY="$OPENAI_API_KEY" \
-  security-analyzer:latest
+  ajp-security-analyzer:latest
 ```
 
 ---

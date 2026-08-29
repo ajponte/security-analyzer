@@ -258,8 +258,10 @@ security-analyzer/
 └── docs/
     ├── README.md               # Documentation harness index & navigation guide
     └── specs/
-        ├── semgrep-integration.md # Semgrep SAST specification
-        └── llm-integration.md     # [This file] LLM integration & architecture specification
+        ├── docker-gha-integration.md # Docker packaging, GitHub Action, and ECR distribution specification
+        ├── llm-integration.md        # [This file] LLM integration & architecture specification
+        ├── report-generation.md      # Report generation & artifact specification
+        └── semgrep-integration.md    # Semgrep SAST specification
 ```
 
 ---

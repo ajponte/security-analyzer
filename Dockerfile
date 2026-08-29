@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # ==========================================
 FROM python:3.11-slim-bookworm AS runtime
 
-LABEL org.opencontainers.image.title="security-analyzer" \
+LABEL org.opencontainers.image.title="ajp-security-analyzer" \
       org.opencontainers.image.description="LLM-based security scanner and Semgrep SAST orchestrator for GitHub Actions" \
       org.opencontainers.image.source="https://github.com/ajponte/security-analyzer" \
       org.opencontainers.image.licenses="MIT"
