@@ -24,11 +24,11 @@ func NewClient(cfg *config.LLMConfig) (llm.LLMClient, error) {
 
 	switch provider {
 	case "openai":
-		return openai.NewOpenAIClientWithConfig(cfg.OpenAIKey, cfg.Model)
+		return openai.NewClientWithConfig(cfg.OpenAIKey, cfg.Model)
 	case "anthropic":
-		return anthropic.NewAnthropicClientWithConfig(cfg.AnthropicKey, cfg.Model)
+		return anthropic.NewClientWithConfig(cfg.AnthropicKey, cfg.Model)
 	case "gemini":
-		return gemini.NewGeminiClientWithConfig(cfg.GeminiKey, cfg.Model)
+		return gemini.NewClientWithConfig(cfg.GeminiKey, cfg.Model)
 	default:
 		return nil, fmt.Errorf("unsupported LLM provider: %q", cfg.Provider)
 	}

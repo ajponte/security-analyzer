@@ -21,8 +21,25 @@ const (
 	defaultEndpointBase = "https://generativelanguage.googleapis.com/v1beta/models"
 )
 
-type httpDoer interface {
-	Do(req *http.Request) (*http.Response, error)
+// Option configures the Gemini Client.
+type Option func(*Client)
+
+// WithHTTPClient sets a custom HTTP client for the Gemini Client.
+func WithHTTPClient(httpClient llm.HTTPClient) Option {
+	return func(c *Client) {
+		if httpClient != nil {
+			c.http = httpClient
+		}
+	}
+}
+
+// WithEndpointBase sets a custom API base URL for the Gemini Client.
+func WithEndpointBase(base string) Option {
+	return func(c *Client) {
+		if base != "" {
+			c.endpointBase = base
+		}
+	}
 }
 
 // Client implements llm.LLMClient for Google Gemini models.
@@ -30,16 +47,19 @@ type Client struct {
 	apiKey       string
 	model        string
 	endpointBase string
-	http         httpDoer
+	http         llm.HTTPClient
 }
 
-// NewGeminiClient constructs a Client from environment configuration.
-func NewGeminiClient() (*Client, error) {
-	return NewGeminiClientWithConfig(os.Getenv("GEMINI_API_KEY"), os.Getenv("LLM_MODEL"))
+// GeminiClient is an alias for Client for backward compatibility.
+type GeminiClient = Client
+
+// NewClient constructs a Client from environment configuration.
+func NewClient(opts ...Option) (*Client, error) {
+	return NewClientWithConfig(os.Getenv("GEMINI_API_KEY"), os.Getenv("LLM_MODEL"), opts...)
 }
 
-// NewGeminiClientWithConfig constructs a Client with explicit API key and model.
-func NewGeminiClientWithConfig(apiKey, model string) (*Client, error) {
+// NewClientWithConfig constructs a Client with explicit API key, model, and functional options.
+func NewClientWithConfig(apiKey, model string, opts ...Option) (*Client, error) {
 	if apiKey == "" {
 		return nil, errors.New("missing API key for Gemini")
 	}
@@ -48,83 +68,38 @@ func NewGeminiClientWithConfig(apiKey, model string) (*Client, error) {
 		model = defaultModel
 	}
 
-	return &Client{
+	c := &Client{
 		apiKey:       apiKey,
 		model:        model,
 		endpointBase: defaultEndpointBase,
 		http:         http.DefaultClient,
-	}, nil
+	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	return c, nil
+}
+
+// NewGeminiClient is an alias for NewClient for backward compatibility.
+func NewGeminiClient(opts ...Option) (*Client, error) {
+	return NewClient(opts...)
+}
+
+// NewGeminiClientWithConfig is an alias for NewClientWithConfig for backward compatibility.
+func NewGeminiClientWithConfig(apiKey, model string, opts ...Option) (*Client, error) {
+	return NewClientWithConfig(apiKey, model, opts...)
 }
 
 // SetHTTPClient overrides the HTTP transport. Intended for tests.
-func (c *Client) SetHTTPClient(doer httpDoer) {
-	if doer != nil {
-		c.http = doer
-	}
+func (c *Client) SetHTTPClient(httpClient llm.HTTPClient) {
+	WithHTTPClient(httpClient)(c)
 }
 
 // SetEndpointBase overrides the API base URL. Intended for tests.
 func (c *Client) SetEndpointBase(base string) {
-	if base != "" {
-		c.endpointBase = base
-	}
-}
-
-// --- Gemini wire format ---
-
-type geminiRequest struct {
-	Contents          []geminiContent         `json:"contents"`
-	Tools             []geminiTool            `json:"tools,omitempty"`
-	SystemInstruction *geminiContent          `json:"systemInstruction,omitempty"`
-	GenerationConfig  *geminiGenerationConfig `json:"generationConfig,omitempty"`
-}
-
-type geminiGenerationConfig struct{}
-
-type geminiContent struct {
-	Role  string       `json:"role,omitempty"`
-	Parts []geminiPart `json:"parts"`
-}
-
-type geminiPart struct {
-	Text             string                  `json:"text,omitempty"`
-	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
-	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
-}
-
-type geminiFunctionCall struct {
-	Name string          `json:"name"`
-	Args json.RawMessage `json:"args,omitempty"`
-}
-
-type geminiFunctionResponse struct {
-	Name     string                 `json:"name"`
-	Response map[string]interface{} `json:"response"`
-}
-
-type geminiTool struct {
-	FunctionDeclarations []geminiFunctionDeclaration `json:"functionDeclarations"`
-}
-
-type geminiFunctionDeclaration struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description,omitempty"`
-	Parameters  interface{} `json:"parameters,omitempty"`
-}
-
-type geminiResponse struct {
-	Candidates []geminiCandidate `json:"candidates"`
-	Error      *geminiError      `json:"error,omitempty"`
-}
-
-type geminiCandidate struct {
-	Content geminiContent `json:"content"`
-}
-
-type geminiError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Status  string `json:"status"`
+	WithEndpointBase(base)(c)
 }
 
 // GenerateResponse implements llm.LLMClient.
@@ -208,90 +183,4 @@ func (c *Client) GenerateResponse(ctx context.Context, messages []llm.Message, t
 		}
 	}
 	return out, nil
-}
-
-// translateMessages converts llm.Message entries into Gemini's format. The
-// system prompt is returned separately (Gemini uses systemInstruction, not a
-// role in the contents array).
-func translateMessages(messages []llm.Message) (string, []geminiContent, error) {
-	var system string
-	var out []geminiContent
-
-	for _, m := range messages {
-		switch m.Role {
-		case llm.RoleSystem:
-			if system != "" {
-				system += "\n"
-			}
-			system += m.Content
-
-		case llm.RoleUser:
-			out = append(out, geminiContent{
-				Role:  "user",
-				Parts: []geminiPart{{Text: m.Content}},
-			})
-
-		case llm.RoleAssistant:
-			var parts []geminiPart
-			if m.Content != "" {
-				parts = append(parts, geminiPart{Text: m.Content})
-			}
-			for _, tc := range m.ToolCalls {
-				raw := json.RawMessage(tc.Arguments)
-				if len(raw) == 0 {
-					raw = json.RawMessage("{}")
-				}
-				parts = append(parts, geminiPart{
-					FunctionCall: &geminiFunctionCall{
-						Name: tc.Name,
-						Args: raw,
-					},
-				})
-			}
-			if len(parts) == 0 {
-				continue
-			}
-			out = append(out, geminiContent{Role: "model", Parts: parts})
-
-		case llm.RoleTool:
-			name := m.Name
-			if name == "" {
-				name = m.ToolCallID
-			}
-			toolPart := geminiPart{
-				FunctionResponse: &geminiFunctionResponse{
-					Name:     name,
-					Response: map[string]interface{}{"content": m.Content},
-				},
-			}
-			if len(out) > 0 && out[len(out)-1].Role == "user" {
-				out[len(out)-1].Parts = append(out[len(out)-1].Parts, toolPart)
-			} else {
-				out = append(out, geminiContent{
-					Role:  "user",
-					Parts: []geminiPart{toolPart},
-				})
-			}
-
-		default:
-			return "", nil, fmt.Errorf("unsupported message role: %q", m.Role)
-		}
-	}
-
-	return system, out, nil
-}
-
-func translateTools(tools []llm.Tool) []geminiTool {
-	if len(tools) == 0 {
-		return nil
-	}
-	decls := make([]geminiFunctionDeclaration, len(tools))
-	for i, t := range tools {
-		decls[i] = geminiFunctionDeclaration{
-			Name:        t.Name,
-			Description: t.Description,
-			Parameters:  t.Parameters,
-		}
-	}
-	return []geminiTool{{FunctionDeclarations: decls}}
 }

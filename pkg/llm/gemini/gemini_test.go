@@ -46,16 +46,32 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.S
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	t.Setenv("GEMINI_API_KEY", "mock-key")
-	t.Setenv("LLM_MODEL", "gemini-test")
-
-	client, err := NewGeminiClient()
+	client, err := NewClientWithConfig("mock-key", "gemini-test",
+		WithEndpointBase(server.URL),
+		WithHTTPClient(server.Client()),
+	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	client.SetEndpointBase(server.URL)
-	client.SetHTTPClient(server.Client())
 	return client, server
+}
+
+func TestGemini_Options(t *testing.T) {
+	customHTTP := &http.Client{}
+	client, err := NewClientWithConfig("mock-key", "custom-model",
+		WithEndpointBase("https://custom.gemini.com"),
+		WithHTTPClient(customHTTP),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if client.endpointBase != "https://custom.gemini.com" {
+		t.Errorf("expected custom endpointBase, got %q", client.endpointBase)
+	}
+	if client.http != customHTTP {
+		t.Errorf("expected custom HTTP client")
+	}
 }
 
 func TestGemini_GenerateResponse_TextOnly(t *testing.T) {

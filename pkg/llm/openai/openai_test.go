@@ -39,18 +39,37 @@ func TestNewOpenAIClient(t *testing.T) {
 	}
 }
 
-func newTestClient(t *testing.T, handler http.HandlerFunc) (*OpenAIClient, *httptest.Server) {
+func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	client, err := NewOpenAIClientWithConfig("mock-key", "gpt-4o-mini")
+	client, err := NewClientWithConfig("mock-key", "gpt-4o-mini",
+		WithBaseURL(server.URL+"/v1"),
+		WithHTTPClient(server.Client()),
+	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	client.SetBaseURL(server.URL + "/v1")
-	client.SetHTTPClient(server.Client())
 	return client, server
+}
+
+func TestOpenAI_Options(t *testing.T) {
+	customHTTP := &http.Client{}
+	client, err := NewClientWithConfig("mock-key", "custom-model",
+		WithBaseURL("https://custom.api.com/v1"),
+		WithHTTPClient(customHTTP),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if client.config.BaseURL != "https://custom.api.com/v1" {
+		t.Errorf("expected custom BaseURL, got %q", client.config.BaseURL)
+	}
+	if client.config.HTTPClient != customHTTP {
+		t.Errorf("expected custom HTTPClient")
+	}
 }
 
 func TestOpenAI_GenerateResponse_TextOnly(t *testing.T) {
